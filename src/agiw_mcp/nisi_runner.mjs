@@ -9,8 +9,6 @@
 // is never executed. The only network destination is the configured loopback
 // chat endpoint, enforced by Nisi's local-chat adapter.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runWorkflow } from './nisi/package/workflow/engine.mjs';
 import { createLocalChatAuthorAdapter, createLocalChatReviewerAdapter } from './nisi/package/adapters/local-chat.mjs';
@@ -18,7 +16,8 @@ import { createLocalChatAuthorAdapter, createLocalChatReviewerAdapter } from './
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
 const MESSAGE_LIMIT = 400;
 const WORK_DIR = fileURLToPath(new URL('.', import.meta.url));
-const CHECK_DIR = join(WORK_DIR, 'check');
+// The checker child gets this process's sandbox explicitly: Node versions differ in what they pass on.
+const CHILD_SANDBOX = process.execArgv.filter(arg => /^--(?:experimental-permission|permission|allow-fs-read=|allow-fs-write=)/u.test(arg));
 const PYTHON_CHECK = [
   'import ast, sys',
   'source = sys.stdin.buffer.read()',
@@ -55,21 +54,18 @@ function extension(path) {
   return dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
 }
 
-let checkCounter = 0;
-function nodeCheck(path, content, suffix, timeout) {
-  mkdirSync(CHECK_DIR, { recursive: true, mode: 0o700 });
-  checkCounter += 1;
-  const file = join(CHECK_DIR, `c${checkCounter}.${suffix}`);
-  writeFileSync(file, content, { encoding: 'utf8', mode: 0o600 });
-  const result = spawnSync(process.execPath, ['--check', file], {
-    cwd: WORK_DIR, env: process.env, timeout, stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 65536,
+// The source goes to `node --check` on stdin, never as a file path. The child inherits the permission
+// model, and checking a path makes Node resolve every parent folder (/tmp, /var), which the model refuses.
+function nodeCheck(path, content, inputType, timeout) {
+  const result = spawnSync(process.execPath, [...CHILD_SANDBOX, `--input-type=${inputType}`, '--check'], {
+    cwd: WORK_DIR, env: process.env, timeout, input: content, stdio: ['pipe', 'ignore', 'pipe'], maxBuffer: 65536,
   });
   if (result.error || result.signal || result.status === null) return { status: 'UNAVAILABLE' };
   if (result.status === 0) return { status: 'PASS' };
-  const stderr = String(result.stderr ?? '');
-  const line = /:(\d+)\s*$/mu.exec(stderr.split('\n')[0] ?? '')?.[1];
-  const reason = stderr.split('\n').find(row => /^[A-Za-z]*Error\b/u.test(row)) ?? 'SyntaxError';
-  return { status: 'FAIL', message: clip(`${path}${line ? `:${line}` : ''}: ${reason.split(file).join(path)}`) };
+  const rows = String(result.stderr ?? '').split('\n');
+  const line = rows.map(row => /^\[stdin\]:(\d+)\s*$/u.exec(row)?.[1]).find(Boolean);
+  const reason = rows.find(row => /^[A-Za-z]*Error\b/u.test(row)) ?? 'SyntaxError';
+  return { status: 'FAIL', message: clip(`${path}${line ? `:${line}` : ''}: ${reason.split('[stdin]').join(path)}`) };
 }
 
 function syntaxCheck(path, content, request) {
@@ -79,11 +75,12 @@ function syntaxCheck(path, content, request) {
     try { JSON.parse(content); return { status: 'PASS' }; }
     catch (error) { return { status: 'FAIL', message: clip(`${path}: ${error.message}`) }; }
   }
-  if (ext === 'mjs' || ext === 'cjs') return nodeCheck(path, content, ext, timeout);
+  if (ext === 'mjs') return nodeCheck(path, content, 'module', timeout);
+  if (ext === 'cjs') return nodeCheck(path, content, 'commonjs', timeout);
   if (ext === 'js') {
-    const asScript = nodeCheck(path, content, 'cjs', timeout);
+    const asScript = nodeCheck(path, content, 'commonjs', timeout);
     if (asScript.status !== 'FAIL') return asScript;
-    const asModule = nodeCheck(path, content, 'mjs', timeout);
+    const asModule = nodeCheck(path, content, 'module', timeout);
     return asModule.status === 'FAIL' ? asScript : asModule;
   }
   if (ext === 'py') {
