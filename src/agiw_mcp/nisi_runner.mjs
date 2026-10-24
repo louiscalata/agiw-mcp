@@ -96,9 +96,22 @@ function syntaxCheck(path, content, request) {
   return { status: 'NOT_SUPPORTED' };
 }
 
+// Adds `reasoning_effort` to the JSON body of each chat request when configured. Nisi's receipts hash the
+// body Nisi built; the run result reports the added field so the difference is visible.
+function withReasoningEffort(effort) {
+  if (effort === null || effort === undefined) return undefined;
+  if (!['none', 'low', 'medium', 'high'].includes(effort)) fail('REQUEST_INVALID');
+  return (url, init) => {
+    const body = JSON.parse(init.body);
+    return globalThis.fetch(url, { ...init, body: JSON.stringify({ ...body, reasoning_effort: effort }) });
+  };
+}
+
 function buildAdapters(request) {
+  const fetchWithEffort = withReasoningEffort(request.reasoningEffort);
   const base = { destination: 'LOOPBACK_HTTP', endpoint: request.endpoint, timeoutMs: request.deadlineMs,
-    maxOutputTokens: request.maxOutputTokens, maxRequestBytes: 8 * 1024 * 1024, maxResponseBytes: 8 * 1024 * 1024 };
+    maxOutputTokens: request.maxOutputTokens, maxRequestBytes: 8 * 1024 * 1024, maxResponseBytes: 8 * 1024 * 1024,
+    ...(fetchWithEffort ? { fetch: fetchWithEffort } : {}) };
   const innerAuthor = createLocalChatAuthorAdapter({ ...base, model: request.authorModel, id: 'agiw.author' });
   const reviewer = createLocalChatReviewerAdapter({ ...base, model: request.reviewerModel, id: 'agiw.reviewer' });
   // Nisi's task record has a fixed schema, so the request text and current file

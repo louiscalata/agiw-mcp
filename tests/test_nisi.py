@@ -132,6 +132,29 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertFalse(is_error, result)
         return result
 
+    def chat_bodies(self):
+        return [json.loads(record["body"]) for record in self.models.requests
+                if record["path"] == "/v1/chat/completions"]
+
+    def test_reasoning_effort_is_sent_only_when_configured(self):
+        # Reasoning models on LM Studio return empty content under JSON-schema output unless this is "none".
+        self.models.draft = lambda prompt: {"candidate": {"files": [
+            {"path": "lib.mjs", "content": "export const answer = 42;\n"}]}, "note": "New module."}
+        args = {"task": "Add a module.", "new_files": ["lib.mjs"], "repair_budget": 0}
+        result = self.run_tool(args)
+        self.assertTrue(self.chat_bodies())
+        self.assertFalse([body for body in self.chat_bodies() if "reasoning_effort" in body])
+        self.assertIsNone(result["reasoningEffort"])
+        self.models.requests.clear()
+        os.environ["AGIW_MCP_REASONING_EFFORT"] = "none"
+        result = self.run_tool(args)
+        bodies = self.chat_bodies()
+        self.assertEqual({op for op, _ in self.models.calls}, {"draft", "review"})
+        self.assertTrue(bodies)
+        self.assertEqual({body.get("reasoning_effort") for body in bodies}, {"none"})
+        self.assertEqual(result["reasoningEffort"], "none")
+        self.assertEqual(result["outcome"], "COMPLETED", result)
+
     def test_completed_run_with_no_side_effects(self):
         self.models.draft = lambda prompt: {"candidate": {"files": [
             {"path": "calc.py", "content": current(prompt, "calc.py").replace("a - b", "a + b")}]},
@@ -163,6 +186,63 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertEqual([tree_snapshot(path) for path in watched], before)
         self.assertEqual(os.listdir(temp_parent), [])
         self.assertEqual(os.getcwd(), str(project))
+
+    def test_failed_probe_refuses_and_is_not_cached(self):
+        marker = self.tmp / "started"
+        fake = write_fake_node(self.tmp / "badbin", "import sys, pathlib\n"
+                               "if '--help' in sys.argv: sys.exit(1)\n"
+                               f"pathlib.Path({str(marker)!r}).write_text('started')\n")
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        with self.assertRaises(ToolError) as ctx:
+            nisi.permission_flags(str(fake), "/work")
+        self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
+        self.assertNotIn(str(fake), nisi._FLAG_CACHE)
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model")
+        parent = self.tmp / "tmpparent-probe"
+        parent.mkdir()
+        with mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))):
+            with self.assertRaises(ToolError) as ctx:
+                nisi.run({"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}, load_config(),
+                         temp_parent=str(parent))
+        self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
+        self.assertFalse(marker.exists(), "Node was started without a sandbox")
+        self.assertEqual(os.listdir(parent), [])
+
+    def test_probes_get_no_keys_or_proxies(self):
+        seen = self.tmp / "probe-env.json"
+        fake = write_fake_node(self.tmp / "envbin", "import json, os, pathlib, sys\n"
+                               f"pathlib.Path({str(seen)!r}).write_text(json.dumps(sorted(os.environ)))\n"
+                               "sys.stdout.write('v22.13.0\\n' if '--version' in sys.argv else '  --permission\\n')\n")
+        for name in ("TYPESAFE_API_KEY", "HTTPS_PROXY", "https_proxy", "ALL_PROXY"):
+            os.environ[name] = "secret-value-123"
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        def check():
+            names = json.loads(seen.read_text())
+            self.assertIn("PATH", names)
+            self.assertFalse({"TYPESAFE_API_KEY", "HTTPS_PROXY", "https_proxy", "ALL_PROXY"} & set(names), names)
+            seen.unlink()
+
+        nisi.permission_flags(str(fake), "/work")
+        check()
+        with mock.patch.object(nisi.shutil, "which", return_value=str(fake)):
+            self.assertEqual(nisi.find_node(), (str(fake), (22, 13, 0)))
+        check()
+
+    def test_comma_in_temp_path_is_refused(self):
+        fake = write_fake_node(self.tmp / "bin", FakeRunnerTests.RUNNER % "ok")
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model")
+        parent = self.tmp / "a,b"
+        parent.mkdir()
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        with mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))):
+            with self.assertRaises(ToolError) as ctx:
+                nisi.run({"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}, load_config(),
+                         temp_parent=str(parent))
+        self.assertEqual(ctx.exception.code, "TEMP_DIR_UNSAFE")
+        self.assertEqual(os.listdir(parent), [])
 
     def test_permission_flag_detection(self):
         # Node 22.13+ prints both names on one line; Node 24 prints only --permission; early Node 22 only the

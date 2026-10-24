@@ -22,8 +22,8 @@ SECURITY_BIN = "/usr/bin/security"
 SECRET_TOOL_CANDIDATES = ("/usr/bin/secret-tool", "/usr/local/bin/secret-tool", "/bin/secret-tool")
 PRESENCE_TIMEOUT = 3.0
 READ_TIMEOUT = 10.0
-KEY_UNAVAILABLE_MESSAGE = ("No usable TypeSafe API key is available. Store one as described in the "
-                           "README section 'Jev key setup', then try again.")
+KEY_UNAVAILABLE_MESSAGE = ("No usable TypeSafe API key is available. Store one as described under "
+                           "'Jev key and consent' in the README's Setup details, then try again.")
 _KEY_SHAPE = re.compile(r"[\x21-\x7e]{8,512}\Z")
 
 

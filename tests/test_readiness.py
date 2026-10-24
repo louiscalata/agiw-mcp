@@ -43,7 +43,22 @@ class ReadinessTests(IsolatedTestCase):
         result = readiness.evaluate()
         self.assertEqual(result["status"], "READY", result)
         self.assertEqual([row["id"] for row in result["checks"]],
-                         ["python", "config", "node", "nisi", "models", "jev_key", "consent"])
+                         ["python", "config", "node", "nisi", "models", "consent", "jev_key"])
+
+    def test_key_is_never_looked_up_before_consent(self):
+        # On Linux the Secret Service lookup returns the secret, so nothing may probe it before consent.
+        self.configure()
+        # readiness turns exceptions into rows, so count calls instead of raising from the mock.
+        with mock.patch.object(readiness.keys, "key_presence", return_value={"present": True, "source": "x"}) as probe:
+            for stop_at_first in (True, False):
+                result = readiness.evaluate(stop_at_first=stop_at_first)
+                self.assertEqual(result["missing"]["id"], "consent", result)
+            status, is_error = tools.call_tool("agiw_status", {})
+            self.assertFalse(is_error, status)
+            self.assertEqual(probe.call_count, 0)
+            self.grant_consent()
+            readiness.evaluate(stop_at_first=False)
+            self.assertEqual(probe.call_count, 1)
 
     def test_order_and_first_missing(self):
         self.make_ready()

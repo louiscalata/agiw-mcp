@@ -136,13 +136,18 @@ def _write_new(path: Path, data: bytes) -> None:
 
 # --- Node discovery ---------------------------------------------------------
 
+def _probe_env() -> dict:
+    """Only what `node --version` and `node --help` need: no keys, proxies or other variables."""
+    return {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
+
+
 def find_node() -> tuple[str | None, tuple[int, int, int] | None]:
     path = shutil.which("node")
     if not path:
         return None, None
     try:
         done = subprocess.run([path, "--version"], stdin=subprocess.DEVNULL, capture_output=True,
-                              timeout=3, check=False)
+                              timeout=3, check=False, env=_probe_env())
     except (OSError, subprocess.SubprocessError):
         return path, None
     match = re.fullmatch(rb"v(\d+)\.(\d+)\.(\d+)\s*", done.stdout or b"")
@@ -155,14 +160,19 @@ _FLAG_CACHE: dict[str, list[str] | None] = {}
 
 
 def permission_flags(node: str, workdir: str) -> tuple[list[str], str]:
-    """Return Node permission-model flags for this Node, or none if unsupported."""
+    """Return Node permission-model flags for this Node, or none if unsupported.
+
+    A failed probe is never cached and never means "no sandbox": the run is refused instead."""
     if node not in _FLAG_CACHE:
         try:
             done = subprocess.run([node, "--help"], stdin=subprocess.DEVNULL, capture_output=True,
-                                  timeout=5, check=False)
-            text = (done.stdout or b"").decode("utf-8", "replace")
+                                  timeout=5, check=False, env=_probe_env())
         except (OSError, subprocess.SubprocessError):
-            text = ""
+            done = None
+        if done is None or done.returncode != 0:
+            raise ToolError("NODE_UNAVAILABLE", "Node's permission model could not be checked (node --help "
+                            "failed), so Nisi was not started without a sandbox. Try again.")
+        text = (done.stdout or b"").decode("utf-8", "replace")
         # Node 22.13+ lists "--experimental-permission, --permission" on one line; prefer the stable name.
         if re.search(r"(?<![\w-])--permission\b", text):
             base = ["--permission"]
@@ -394,6 +404,7 @@ def run(args: dict, config: Config, *, temp_parent: str | None = None) -> dict:
         "repairBudget": request["repair_budget"], "deadlineMs": request["timeout"] * 1000,
         "endpoint": config.chat_endpoint, "authorModel": config.author_model,
         "reviewerModel": config.reviewer_model, "maxOutputTokens": config.max_output_tokens,
+        "reasoningEffort": config.reasoning_effort,
         "language": request["language"], "python": sys.executable or "", "checkTimeoutMs": 15000,
     }
     workdir = tempfile.mkdtemp(prefix="agiw-mcp-nisi-", dir=temp_parent)
@@ -401,6 +412,10 @@ def run(args: dict, config: Config, *, temp_parent: str | None = None) -> dict:
         if os.name == "posix":
             os.chmod(workdir, 0o700)
         workdir = os.path.realpath(workdir)
+        if "," in workdir:
+            # Node reads --allow-fs-read/--allow-fs-write as comma-separated lists.
+            raise ToolError("TEMP_DIR_UNSAFE", "The temporary folder path contains a comma, which would widen "
+                            "Node's sandbox. Set TMPDIR to a folder without a comma.")
         try:
             _copy_verified(VENDOR_DIR, Path(workdir))
         except NisiError as exc:
@@ -420,10 +435,10 @@ def run(args: dict, config: Config, *, temp_parent: str | None = None) -> dict:
         result = _parse_output(raw, request)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
-    return _summarize(result, request, sandbox)
+    return _summarize(result, request, sandbox, config.reasoning_effort)
 
 
-def _summarize(result: dict, request: dict, sandbox: str) -> dict:
+def _summarize(result: dict, request: dict, sandbox: str, reasoning_effort: str | None = None) -> dict:
     report = result["report"]
     candidate = report.get("candidate") if isinstance(report.get("candidate"), dict) else None
     original = {item["path"]: item["content"] for item in request["files"]}
@@ -464,6 +479,7 @@ def _summarize(result: dict, request: dict, sandbox: str) -> dict:
         "candidateFingerprint": report.get("candidateFingerprint"),
         "modelReceipts": result.get("receipts") if isinstance(result.get("receipts"), dict) else {},
         "nisiVersion": NISI_VERSION,
+        "reasoningEffort": reasoning_effort,
         "sandbox": sandbox,
         "note": ("Proposed file contents only. agiw-mcp did not read or write any project file; review the "
                  "contents and apply them yourself if you accept them. "

@@ -2,6 +2,7 @@
 
 **A careful coding workflow on your own local models, for any MCP-capable assistant.**
 
+[![CI](https://github.com/louiscalata/agiw-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/louiscalata/agiw-mcp/actions/workflows/ci.yml)
 ![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-informational)
 ![Node.js 22+](https://img.shields.io/badge/node.js-22%2B-informational)
@@ -110,11 +111,16 @@ uvx --from git+https://github.com/louiscalata/agiw-mcp agiw-mcp --version
 
 All keys in `config.json` are optional; unknown keys are refused. Besides the three
 shown in the quick start: `keychain_service` (default `agiw-mcp`), `keychain_account`
-(default `typesafe`), `jev_model` (default `jev-1.14.0`) and `max_output_tokens`
-(default 4096).
+(default `typesafe`), `jev_model` (default `jev-1.14.0`), `max_output_tokens`
+(default 4096) and `reasoning_effort` (unset by default).
+
+`reasoning_effort` (`none`, `low`, `medium` or `high`) is added to each Nisi chat request. Set it
+to `none` for reasoning models such as Qwen 3 or Granite 4 on LM Studio: under JSON-schema output they
+otherwise spend their tokens on hidden reasoning and return empty answers.
 
 The model settings can come from the environment instead:
-`AGIW_MCP_MODEL_BASE_URL`, `AGIW_MCP_AUTHOR_MODEL`, `AGIW_MCP_REVIEWER_MODEL`.
+`AGIW_MCP_MODEL_BASE_URL`, `AGIW_MCP_AUTHOR_MODEL`, `AGIW_MCP_REVIEWER_MODEL`,
+`AGIW_MCP_REASONING_EFFORT`.
 
 Check your setup at any time:
 

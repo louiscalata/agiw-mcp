@@ -169,6 +169,31 @@ class ConfigTests(IsolatedTestCase):
         self.assertEqual((cfg.author_model, cfg.reviewer_model), ("a", "b"))
         self.assertEqual(cfg.model_base_url, "http://[::1]:8080/v1")
 
+    def test_reasoning_effort(self):
+        self.assertIsNone(load_config().reasoning_effort)
+        for value in ("none", "low", "medium", "high"):
+            self.write_config(reasoning_effort=value)
+            self.assertEqual(load_config().reasoning_effort, value)
+        for value in ("off", "None", "", 0, True):
+            self.write_config(reasoning_effort=value)
+            with self.assertRaises(ConfigError, msg=repr(value)):
+                load_config()
+        self.write_config(reasoning_effort="high")
+        os.environ["AGIW_MCP_REASONING_EFFORT"] = "none"
+        self.assertEqual(load_config().reasoning_effort, "none")
+
+    def test_terminal_grant_accepts_only_the_phrase(self):
+        from agiw_mcp import __main__ as cli
+        for answer, recorded in (("I agree", True), ("i agree", True), ('"I agree"', True), ("I agree.", True),
+                                 ("  I AGREE  ", True), ("yes", False), ("I agree to nothing", False),
+                                 ("I", False), ("", False)):
+            consent.revoke()
+            with mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", return_value=answer), \
+                    mock.patch("sys.stdout"):
+                stdin.isatty.return_value = True
+                cli._consent_cli("grant")
+            self.assertEqual(consent.consent_recorded(), recorded, repr(answer))
+
     def test_display_path_hides_home(self):
         home = str(config.Path.home())
         self.assertEqual(config.display_path(home + "/x/y"), "~/x/y")
