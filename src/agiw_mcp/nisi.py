@@ -163,7 +163,8 @@ def permission_flags(node: str, workdir: str) -> tuple[list[str], str]:
             text = (done.stdout or b"").decode("utf-8", "replace")
         except (OSError, subprocess.SubprocessError):
             text = ""
-        if re.search(r"^\s*--permission\b", text, re.M):
+        # Node 22.13+ lists "--experimental-permission, --permission" on one line; prefer the stable name.
+        if re.search(r"(?<![\w-])--permission\b", text):
             base = ["--permission"]
         elif "--experimental-permission" in text:
             base = ["--experimental-permission"]

@@ -164,6 +164,21 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertEqual(os.listdir(temp_parent), [])
         self.assertEqual(os.getcwd(), str(project))
 
+    def test_permission_flag_detection(self):
+        # Node 22.13+ prints both names on one line; Node 24 prints only --permission; early Node 22 only the
+        # experimental name. Picking the experimental name on 22.13+ breaks the checker child.
+        helps = {"  --experimental-permission, --permission\n": "--permission",
+                 "  --permission                  enable the permission model\n": "--permission",
+                 "  --experimental-permission     enable the permission model\n": "--experimental-permission",
+                 "  --no-experimental-permission-x\n": None}
+        for index, (text, expected) in enumerate(helps.items()):
+            fake = write_fake_node(self.tmp / f"bin{index}", f"import sys\nsys.stdout.write({text!r})\n")
+            nisi._FLAG_CACHE.clear()
+            self.addCleanup(nisi._FLAG_CACHE.clear)
+            flags, sandbox = nisi.permission_flags(str(fake), "/work")
+            self.assertEqual(flags[0] if flags else None, expected, text)
+            self.assertEqual(sandbox, "node-permission" if expected else "none")
+
     def test_permission_flags_block_writes_outside_the_work_dir(self):
         node, _ = nisi.find_node()
         work = self.tmp / "work"
@@ -217,8 +232,24 @@ class NisiEndToEndTests(IsolatedTestCase):
                                              "summary": "One naming issue."}
         result = self.run_tool({"task": "Add a module.", "new_files": ["lib.mjs"], "repair_budget": 0})
         self.assertEqual(result["outcome"], "FAILED")
-        self.assertEqual(result["syntax"], {"lib.mjs": "PASS"})
+        self.assertEqual(result["syntax"], {"lib.mjs": "PASS"}, result)
         self.assertEqual(result["proposedFiles"][0]["status"], "new")
+
+    def test_javascript_syntax_checks_by_module_kind(self):
+        # node --check runs on stdin under the permission model; given a path it would resolve parent
+        # folders the model refuses (seen on Node 22 in CI), and every file would report FAIL.
+        files = {"ok.mjs": "export const answer = 42;\n", "ok.cjs": "module.exports = { answer: 42 };\n",
+                 "esm.js": "export default function f() { return 1; }\n", "bad.mjs": "export const a = 1;\nconst = ;\n"}
+        self.models.draft = lambda prompt: {"candidate": {"files": [
+            {"path": path, "content": content} for path, content in files.items()]}, "note": "Four modules."}
+        result = self.run_tool({"task": "Add modules.", "new_files": sorted(files), "repair_budget": 0})
+        self.assertEqual(result["syntax"], {"ok.mjs": "PASS", "ok.cjs": "PASS", "esm.js": "PASS", "bad.mjs": "FAIL"},
+                         result)
+        static = [stage for stage in result["stages"] if stage["stage"] == "staticChecks"][0]
+        messages = " ".join(finding["message"] for finding in static["findings"])
+        self.assertIn("bad.mjs:2", messages)
+        self.assertIn("SyntaxError", messages)
+        self.assertNotIn("[stdin]", messages)
 
 
 if __name__ == "__main__":
