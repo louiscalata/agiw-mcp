@@ -34,9 +34,10 @@ _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}\Z")
 _ITEM_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _JEV_MODEL = re.compile(r"jev-(?:latest|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\Z")
 _KEYS = frozenset({"model_base_url", "author_model", "reviewer_model", "keychain_service",
-                   "keychain_account", "jev_model", "max_output_tokens"})
+                   "keychain_account", "jev_model", "max_output_tokens", "reasoning_effort"})
 _ENV = {"model_base_url": "AGIW_MCP_MODEL_BASE_URL", "author_model": "AGIW_MCP_AUTHOR_MODEL",
-        "reviewer_model": "AGIW_MCP_REVIEWER_MODEL"}
+        "reviewer_model": "AGIW_MCP_REVIEWER_MODEL", "reasoning_effort": "AGIW_MCP_REASONING_EFFORT"}
+REASONING_EFFORTS = ("none", "low", "medium", "high")
 
 
 def test_mode() -> bool:
@@ -101,6 +102,9 @@ class Config:
     keychain_account: str = DEFAULT_ACCOUNT
     jev_model: str = DEFAULT_JEV_MODEL
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    # Sent as `reasoning_effort` on Nisi's chat requests. Reasoning models on LM Studio return empty content
+    # under JSON-schema output unless this is "none"; unset sends nothing, as before.
+    reasoning_effort: str | None = None
     source: str = "defaults"
 
     @property
@@ -115,7 +119,8 @@ class Config:
         return {"model_base_url": self.model_base_url, "author_model": self.author_model,
                 "reviewer_model": self.reviewer_model, "keychain_service": self.keychain_service,
                 "keychain_account": self.keychain_account, "jev_model": self.jev_model,
-                "max_output_tokens": self.max_output_tokens, "source": self.source}
+                "max_output_tokens": self.max_output_tokens, "reasoning_effort": self.reasoning_effort,
+                "source": self.source}
 
 
 class ConfigError(ToolError):
@@ -142,6 +147,10 @@ def _validate(values: dict) -> dict:
         elif key == "max_output_tokens":
             if type(value) is not int or not 256 <= value <= 32768:
                 raise ValueError("max_output_tokens must be an integer from 256 to 32768")
+            out[key] = value
+        elif key == "reasoning_effort":
+            if value is not None and value not in REASONING_EFFORTS:
+                raise ValueError("reasoning_effort must be none, low, medium or high")
             out[key] = value
     return out
 

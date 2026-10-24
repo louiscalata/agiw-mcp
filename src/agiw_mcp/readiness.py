@@ -37,8 +37,8 @@ def check_config() -> tuple[dict, Config | None]:
         config = load_config()
     except ConfigError as exc:
         return _check("config", False, exc.message,
-                      f"Fix or remove {display_path(config_file_path())}; see the README section "
-                      "'Configuration'."), None
+                      f"Fix or remove {display_path(config_file_path())}; see "
+                      "'Configuration file and environment variables' in the README's Setup details."), None
     return _check("config", True, f"Configuration from {config.source}"), config
 
 
@@ -141,9 +141,15 @@ def evaluate(stop_at_first: bool = True) -> dict:
                           "Fix the configuration first.")
         return check_models(holder["config"])
 
+    def key_step() -> dict:
+        # Looking for the key comes after consent: on Linux the Secret Service lookup returns the secret.
+        if not consent.consent_recorded():
+            return _check("jev_key", False, "Not checked until consent is recorded",
+                          "Grant consent first (`agiw-mcp consent grant`), then run agiw_readiness again.")
+        return check_key(holder.get("config") or Config())
+
     steps = [("python", check_python), ("config", config_step), ("node", check_node), ("nisi", check_nisi),
-             ("models", models_step), ("jev_key", lambda: check_key(holder.get("config") or Config())),
-             ("consent", check_consent)]
+             ("models", models_step), ("consent", check_consent), ("jev_key", key_step)]
     for name, step in steps:
         try:
             row = step()

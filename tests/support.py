@@ -75,7 +75,8 @@ socket.getaddrinfo = _guarded_getaddrinfo
 
 
 CLEARED_ENV = ("TYPESAFE_API_KEY", "AGIW_MCP_MODEL_BASE_URL", "AGIW_MCP_AUTHOR_MODEL", "AGIW_MCP_REVIEWER_MODEL",
-               "AGIW_MCP_JEV_URL", "AGIW_MCP_TEST_OS_KEYSTORE", "XDG_CONFIG_HOME")
+               "AGIW_MCP_JEV_URL", "AGIW_MCP_TEST_OS_KEYSTORE", "XDG_CONFIG_HOME",
+               "AGIW_MCP_REASONING_EFFORT")
 
 
 class IsolatedTestCase(unittest.TestCase):

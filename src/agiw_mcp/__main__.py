@@ -38,9 +38,13 @@ def _consent_cli(action: str) -> int:
         if not sys.stdin.isatty():
             print("Refused: run this in an interactive terminal to grant consent.", file=sys.stderr)
             return 2
-        answer = input("Type 'I agree' to allow agiw-mcp to send this to TypeSafe: ").strip()
-        if answer != "I agree":
-            print("Consent was not recorded.")
+        print()
+        print("To allow agiw-mcp to send the items above to TypeSafe, type the two words")
+        print('"I agree" (without the quotes) and press Return. Anything else records nothing.')
+        answer = input("> ")
+        # Accept the phrase with any case, surrounding quotes or a final full stop; nothing else.
+        if answer.strip().strip("'\"").rstrip(".").strip().casefold() != "i agree":
+            print('Consent was not recorded. Run the command again and type only the two words "I agree".')
             return 1
         try:
             _print(consent.grant(consent.disclosure_sha256()))
