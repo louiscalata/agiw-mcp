@@ -1,0 +1,15 @@
+AGIW MCP
+Copyright 2026 Louis Calata
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the full terms.
+
+This distribution includes the public Nisi 0.2.0 workflow library
+(https://github.com/louiscalata/nisi, release v0.2.0), licensed under
+Apache-2.0, in src/agiw_mcp/vendor/nisi/. Its original LICENSE and pinned
+provenance manifest are included with it. The files were copied unchanged from
+the AGIW Suite repository (https://github.com/louiscalata/agiw-suite); see
+PROVENANCE.md for each file, its source path and commit.
+
+The TypeSafe-hosted Jev service, local model servers, model weights, Node.js
+and Python are not bundled. They are separate prerequisites with their own
+terms.
