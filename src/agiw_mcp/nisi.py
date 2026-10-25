@@ -136,9 +136,25 @@ def _write_new(path: Path, data: bytes) -> None:
 
 # --- Node discovery ---------------------------------------------------------
 
+_PROBE_WINDOWS_NAMES = ("SystemRoot", "SYSTEMDRIVE", "WINDIR")
+
+
 def _probe_env() -> dict:
-    """Only what `node --version` and `node --help` need: no keys, proxies or other variables."""
-    return {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
+    """Only what `node --version` and `node --help` need: no keys, proxies or other variables.
+
+    On Windows, SystemRoot, SYSTEMDRIVE and WINDIR are also passed through when set (matched
+    case-insensitively): without SystemRoot, Node 24 aborts with exit 134 initializing its CSPRNG."""
+    env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
+    if os.name == "nt":
+        for canonical in _PROBE_WINDOWS_NAMES:
+            if os.environ.get(canonical):
+                env[canonical] = os.environ[canonical]
+                continue
+            for key, value in os.environ.items():
+                if key.upper() == canonical.upper() and value:
+                    env[canonical] = value
+                    break
+    return env
 
 
 def find_node() -> tuple[str | None, tuple[int, int, int] | None]:
