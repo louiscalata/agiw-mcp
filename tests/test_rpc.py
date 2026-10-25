@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 from support import IsolatedTestCase, ROOT, subprocess_env
 
@@ -27,6 +28,21 @@ INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
 
 
 class RpcTests(IsolatedTestCase):
+    def test_encode_nonserializable_and_nan_results(self):
+        for value in (object(), float("nan")):
+            with self.subTest(value=type(value).__name__):
+                raw = rpc.encode({"jsonrpc": "2.0", "id": "request-id", "result": value})
+                self.assertTrue(raw.endswith(b"\n"))
+                self.assertEqual(json.loads(raw), {"jsonrpc": "2.0", "id": "request-id",
+                                                  "error": {"code": -32603, "message": "Internal error"}})
+
+    def test_encode_oversized_response(self):
+        with mock.patch.object(rpc, "MAX_OUTPUT_BYTES", 256):
+            raw = rpc.encode({"jsonrpc": "2.0", "id": 7, "result": "x" * 257})
+        self.assertLess(len(raw), 256)
+        self.assertEqual(json.loads(raw), {"jsonrpc": "2.0", "id": 7,
+                                          "error": {"code": -32603, "message": "Response too large"}})
+
     def test_initialize_list_and_call(self):
         replies = exchange(frame(INIT), frame({"jsonrpc": "2.0", "method": "notifications/initialized"}),
                            frame({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),

@@ -151,5 +151,62 @@ class ReadinessTests(IsolatedTestCase):
             self.assertNotIn(home + os.sep, result["configDir"])
 
 
+class StatusAndModelTests(IsolatedTestCase):
+    def setUp(self):
+        super().setUp()
+        for patcher in (mock.patch.object(nisi, "find_node", return_value=GOOD_NODE),
+                        mock.patch.object(readiness, "request_json", return_value=(200, {"data": [
+                            {"id": "author-model"}, {"id": "reviewer-model"}]}))):
+            patched = patcher.start()
+            self.addCleanup(patcher.stop)
+        self.models = patched
+
+    def configure(self, author="author-model", reviewer="reviewer-model"):
+        self.write_config(model_base_url="http://127.0.0.1:1235/v1", author_model=author, reviewer_model=reviewer)
+
+    def test_neither_model_listed_points_to_the_server_port(self):
+        self.configure(author="missing-author", reviewer="missing-reviewer")
+        result = readiness.evaluate()
+        missing = result["missing"]
+        self.assertEqual(missing["id"], "models")
+        self.assertIn("http://127.0.0.1:1235/v1/models", missing["detail"])
+        self.assertIn("different server", missing["detail"].lower())
+        self.assertIn("port", missing["detail"].lower())
+        self.assertIn("model_base_url", missing["fix"])
+        self.assertIn("AGIW_MCP_BASE_URL", missing["fix"])
+        self.models.assert_called_once_with("http://127.0.0.1:1235/v1/models",
+                                            timeout=readiness.PROBE_TIMEOUT, max_bytes=1024 * 1024)
+
+    def test_only_one_missing_model_does_not_suggest_wrong_server(self):
+        for author, reviewer, missing_role in (("missing-author", "reviewer-model", "author_model"),
+                                                ("author-model", "missing-reviewer", "reviewer_model")):
+            with self.subTest(role=missing_role):
+                self.configure(author=author, reviewer=reviewer)
+                missing = readiness.evaluate()["missing"]
+                self.assertIn(missing_role, missing["detail"])
+                self.assertNotIn("different server", missing["detail"])
+
+    def test_status_with_broken_config(self):
+        self.write_config(unknown_key=True)
+        result, error = tools.call_tool("agiw_status", {})
+        self.assertFalse(error)
+        self.assertIsNone(result["config"])
+        self.assertIn("unknown keys", result["configError"])
+        self.assertFalse(result["prerequisites"]["config"])
+        self.models.assert_not_called()
+
+    def test_status_with_tampered_vendor(self):
+        copy = self.tmp / "vendor-status"
+        shutil.copytree(nisi.VENDOR_DIR, copy)
+        target = copy / "package" / "workflow" / "engine.mjs"
+        target.write_bytes(target.read_bytes() + b"\n// tampered\n")
+        with mock.patch.object(nisi, "VENDOR_DIR", copy):
+            result, error = tools.call_tool("agiw_status", {})
+        self.assertFalse(error)
+        self.assertEqual(result["nisi"], {"version": nisi.NISI_VERSION, "verified": False,
+                                         "code": "NISI_HASH_MISMATCH"})
+        self.assertFalse(result["prerequisites"]["nisi"])
+
+
 if __name__ == "__main__":
     unittest.main()

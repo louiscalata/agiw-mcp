@@ -119,8 +119,13 @@ to `none` for reasoning models such as Qwen 3 or Granite 4 on LM Studio: under J
 otherwise spend their tokens on hidden reasoning and return empty answers.
 
 The model settings can come from the environment instead:
-`AGIW_MCP_MODEL_BASE_URL`, `AGIW_MCP_AUTHOR_MODEL`, `AGIW_MCP_REVIEWER_MODEL`,
+`AGIW_MCP_BASE_URL` (or the legacy `AGIW_MCP_MODEL_BASE_URL`, used only when
+`AGIW_MCP_BASE_URL` is unset), `AGIW_MCP_AUTHOR_MODEL`, `AGIW_MCP_REVIEWER_MODEL`,
 `AGIW_MCP_REASONING_EFFORT`.
+
+| Config key | Environment variable | Precedence and validation |
+|---|---|---|
+| `model_base_url` | `AGIW_MCP_BASE_URL` | `AGIW_MCP_BASE_URL`, then legacy `AGIW_MCP_MODEL_BASE_URL`, then the config file, then `http://127.0.0.1:1234/v1`. Only HTTP loopback literals (`127.0.0.1` or `[::1]`) are accepted; for a server on port 1235, use `http://127.0.0.1:1235/v1`. |
 
 Check your setup at any time:
 
@@ -152,16 +157,26 @@ stores it in a plain file:
    secret-tool store --label='agiw-mcp TypeSafe' service agiw-mcp account typesafe
    ```
 
-On Windows, use the environment variable. The readiness check only checks that a
-key is present; it never reads the value.
+On Windows, use the environment variable. On macOS, the readiness check
+verifies presence without reading the key. On Linux, `secret-tool lookup`
+returns the value, which agiw-mcp discards.
 
 The Jev tools refuse to run until you consent:
 
 ```bash
 agiw-mcp consent show      # exactly what is sent, and to where
-agiw-mcp consent grant     # interactive; type "I agree"
+agiw-mcp consent grant     # interactive; type I agree and press Return
 agiw-mcp consent revoke
 ```
+
+The confirmation is case-insensitive. In order, the prompt trims outer
+whitespace, strips leading and trailing straight single or double quote
+characters, removes all trailing periods, trims outer whitespace again, and
+compares the result case-insensitively with `i agree`. For example, `I AGREE`,
+`'I agree'`, `I agree...` and `"I agree."` are accepted; `"I agree".` is not,
+because quote stripping happens before period removal. Extra words or a
+different space between the two words are not accepted. Non-interactive input
+is refused, and an unrecognized confirmation records nothing.
 
 Consent is tied to a hash of the disclosure text, so if a later version changes what
 is sent, you are asked again. See [SECURITY.md](SECURITY.md).

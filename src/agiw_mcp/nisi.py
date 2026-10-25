@@ -5,8 +5,13 @@
 The caller passes file contents, not paths. agiw-mcp never reads or writes the
 user's project. Each run gets a private temporary directory (mode 0700) that
 receives a hash-verified copy of Nisi and the runner, and is removed afterwards.
-Node runs there with its permission model limiting file access to that
-directory where the installed Node supports it.
+Node's version and permission probes receive only PATH, LANG=C.UTF-8 and
+NODE_NO_WARNINGS=1. A failed permission probe refuses the run with
+NODE_UNAVAILABLE. When Node exposes a supported permission flag, the runner
+uses it to limit file access to the temporary directory; otherwise it proceeds
+without permission flags and reports sandbox "none" (no unsupported-model
+refusal is implemented). A comma in the resolved temporary path refuses the
+run with TEMP_DIR_UNSAFE. The runner also uses a minimal environment.
 """
 from __future__ import annotations
 
@@ -360,9 +365,10 @@ def _child_env(node: str, workdir: str) -> dict:
     path_dirs = [os.path.dirname(node)] + (["/usr/bin", "/bin"] if os.name == "posix" else [])
     env = {"PATH": os.pathsep.join(path_dirs), "HOME": workdir, "TMPDIR": workdir, "TMP": workdir,
            "TEMP": workdir, "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
-    for name in ("SYSTEMROOT", "WINDIR"):
-        if os.environ.get(name):
-            env[name] = os.environ[name]
+    if os.name == "nt":  # Node cannot start on Windows without these; nothing else needs them
+        for name in ("SYSTEMROOT", "WINDIR"):
+            if os.environ.get(name):
+                env[name] = os.environ[name]
     return env
 
 
@@ -375,6 +381,11 @@ def _parse_output(raw: bytes, request: dict) -> dict:
         raise ToolError("NISI_RUNNER_FAILED", "The Nisi runner did not return a valid result.")
     if "error" in value:
         code = value["error"] if isinstance(value["error"], str) and len(value["error"]) <= 64 else "RUNNER_FAILED"
+        if code == "MODEL_ANSWER_IN_REASONING" and value.get("modelRole") in ("author", "reviewer"):
+            model = request[value["modelRole"] + "Model"]
+            raise ToolError(code, f"Model {model!r} returned an answer only in reasoning_content with empty "
+                            "or missing content. Reasoning was not accepted as an answer. Set reasoning_effort "
+                            "to 'none' in config.json or set AGIW_MCP_REASONING_EFFORT=none, then retry.")
         raise ToolError("NISI_RUNNER_FAILED", "The Nisi runner refused the request.", runnerCode=code)
     report = value.get("report")
     if not isinstance(report, dict) or report.get("outcome") not in OUTCOMES:
@@ -432,7 +443,7 @@ def run(args: dict, config: Config, *, temp_parent: str | None = None) -> dict:
             raise ToolError("NISI_TIMEOUT", "The Nisi run did not finish in time and was stopped.")
         if state == "overflow":
             raise ToolError("NISI_OUTPUT_TOO_LARGE", "The Nisi runner produced too much output and was stopped.")
-        result = _parse_output(raw, request)
+        result = _parse_output(raw, payload)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     return _summarize(result, request, sandbox, config.reasoning_effort)
