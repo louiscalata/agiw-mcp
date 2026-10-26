@@ -24,8 +24,10 @@ There is no telemetry and no update check.
 
 ## Consent
 
-- Enforced by the server. `agiw_jev_pre` and `agiw_jev_post` refuse before
-  reading the key or opening a connection unless consent is recorded.
+- Enforced by the server. `agiw_jev_pre` and `agiw_jev_post` refuse with
+  `CONSENT_REQUIRED` before looking up the key or opening a connection unless
+  consent is recorded. Readiness and status also skip the key presence lookup
+  until consent is recorded, including when reporting all readiness checks.
 - Consent is bound to the SHA-256 of the disclosure text. A changed disclosure
   invalidates earlier consent.
 - Only the user can grant consent, by running `agiw-mcp consent grant` in an
@@ -41,13 +43,15 @@ There is no telemetry and no update check.
   (`/usr/bin/security find-generic-password -s <service> -a <account> -w`), the
   Linux Secret Service (`secret-tool lookup service <service> account <account>`).
   Plaintext key files are not supported.
-- Presence checks never retrieve the value: the macOS query omits `-w`, and the
-  Linux lookup's output is sent to `/dev/null` so only the exit code is used.
-- The value is read only by the Jev tools, after the consent check, and sent
-  only in the `Authorization` header to the fixed TypeSafe endpoint. Redirects
-  are refused, so the key is never re-sent elsewhere.
-- Every key failure returns one fixed message. Errors never include the key,
-  any part of it, a path, or the output of `security` or `secret-tool`.
+- Presence checks run after consent: the macOS query omits `-w`; the Linux
+  `secret-tool lookup` retrieves the secret, but its output is sent to
+  `/dev/null` so only the exit code is used.
+- The Jev tools read the value after the consent check and send it only in the
+  `Authorization` header to the fixed TypeSafe endpoint. Redirects are
+  refused, so the key is never re-sent elsewhere.
+- Every Jev key lookup failure returns `KEY_UNAVAILABLE` with one fixed
+  message. Errors never include the key, any part of it, a path, or the output
+  of `security` or `secret-tool`.
 
 ## Nisi runs
 
@@ -58,10 +62,27 @@ There is no telemetry and no update check.
   pinned manifest (itself pinned by SHA-256) before Node starts. The
   directory is removed afterwards, also on failure and timeout. The test suite
   verifies that nothing outside it changes.
-- Node runs with its permission model where available (`--permission`, file
-  reads and writes limited to that directory), a minimal environment (`HOME`
-  and `TMPDIR` point into the directory), a wall-clock limit, and capped
-  output. The process group is killed on timeout.
+- Node's version and permission probes (`node --version` and `node --help`)
+  run with only the inherited `PATH`, `LANG=C.UTF-8` and `NODE_NO_WARNINGS=1`;
+  keys, proxy settings and other environment variables are not passed to them.
+  A failed permission probe (exception or nonzero exit) refuses the run with
+  `NODE_UNAVAILABLE`; that failed result is not cached.
+- If Node's help lists `--permission` or `--experimental-permission`, the
+  runner uses that permission model with file reads and writes limited to the
+  temporary directory. When both flags are listed, `--permission` is preferred.
+  If neither flag is listed, the current implementation proceeds without
+  permission flags and reports `sandbox: "none"`; it does not refuse unsupported
+  permission models, and there is no refusal code for that case.
+- A comma in the resolved temporary directory path refuses the run with
+  `TEMP_DIR_UNSAFE`, since Node interprets file access allowlists as
+  comma-separated paths. Use a `TMPDIR` without a comma.
+- The runner uses a minimal environment: `PATH` (the Node directory and,
+  on POSIX, `/usr/bin` and `/bin`), `HOME`, `TMPDIR`, `TMP` and `TEMP`
+  (all pointing to the temporary directory), `LANG` (`C.UTF-8`) and
+  `NODE_NO_WARNINGS` (`1`). On Windows, `SYSTEMROOT` and `WINDIR` are also
+  set to their parent values when present. The runner also has a
+  wall-clock limit and capped output. The process group is killed on
+  timeout.
 - Generated code is never executed. Static checks only parse it: `node --check`
   for JavaScript, Python's `ast.parse` in an isolated interpreter (`-I -S -B`),
   and `JSON.parse`. These checker processes are started by the runner, which is

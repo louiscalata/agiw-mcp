@@ -1,5 +1,6 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
+import io
 import os
 import socket
 import threading
@@ -14,6 +15,28 @@ from agiw_mcp import net
 
 
 class NetTests(IsolatedTestCase):
+    def request_fixture(self, raw, max_bytes):
+        response = io.BytesIO(raw)
+        response.status = 200
+        with mock.patch.object(net, "_opener") as opener:
+            opener.return_value.open.return_value = response
+            return net.request_json("http://127.0.0.1:1235/x", timeout=3.0, max_bytes=max_bytes)
+
+    def test_invalid_json_responses_are_refused(self):
+        for raw in (b'{"x":1,"x":2}', b'{"x":NaN}', b'{"x":Infinity}', b'{"x":-Infinity}', b"{broken", b"\xff"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(net.HttpFailure) as ctx:
+                    self.request_fixture(raw, 1024)
+                self.assertEqual(ctx.exception.kind, "invalid_json")
+                self.assertEqual(ctx.exception.status, 200)
+
+    def test_response_size_limit(self):
+        self.assertEqual(self.request_fixture(b'{"x":1}', 7), (200, {"x": 1}))
+        with self.assertRaises(net.HttpFailure) as ctx:
+            self.request_fixture(b'{"x":1}', 6)
+        self.assertEqual(ctx.exception.kind, "too_large")
+        self.assertEqual(ctx.exception.status, 200)
+
     def test_proxy_variables_are_ignored(self):
         for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY"):
             os.environ[name] = "http://127.0.0.1:9"

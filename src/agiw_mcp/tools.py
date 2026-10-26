@@ -36,7 +36,7 @@ TOOLS = [
         "description": ("The \"initiate online code mode\" check. Only checks, never starts work. Returns READY, or "
                         "the FIRST missing prerequisite with an exact fix, in this order: Python, configuration, "
                         "Node.js 22+, vendored Nisi hashes, local OpenAI-compatible model server listing two "
-                        "distinct configured models, TypeSafe API key present (value never read), consent recorded."),
+                        "distinct configured models, consent recorded, TypeSafe API key present (macOS: presence checked without reading it; Linux: `secret-tool lookup` returns it but agiw-mcp discards it)."),
         "inputSchema": _EMPTY,
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },

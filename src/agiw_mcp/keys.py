@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """TypeSafe API key lookup: environment, then macOS Keychain, then Secret Service.
 
-Presence checks never retrieve the secret: on macOS the Keychain query omits
-``-w`` and on Linux the lookup output goes to /dev/null, so only the exit code
-is seen. ``read_key`` is called only by the Jev tools after consent is checked.
+Presence checks verify that a key exists. On macOS, the Keychain query
+omits ``-w`` so the value is not returned. On Linux, ``secret-tool lookup``
+returns the value to agiw-mcp, which discards it and never logs or prints it.
+``read_key`` is called only by the Jev tools after consent is checked.
 Every failure raises KeyUnavailable with one fixed message; no key, path
 fragment or tool output is ever included. Plaintext key files are not supported.
 """

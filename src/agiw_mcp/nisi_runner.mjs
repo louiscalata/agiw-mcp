@@ -14,6 +14,7 @@ import { runWorkflow } from './nisi/package/workflow/engine.mjs';
 import { createLocalChatAuthorAdapter, createLocalChatReviewerAdapter } from './nisi/package/adapters/local-chat.mjs';
 
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MESSAGE_LIMIT = 400;
 const WORK_DIR = fileURLToPath(new URL('.', import.meta.url));
 // The checker child gets this process's sandbox explicitly: Node versions differ in what they pass on.
@@ -96,24 +97,53 @@ function syntaxCheck(path, content, request) {
   return { status: 'NOT_SUPPORTED' };
 }
 
-// Adds `reasoning_effort` to the JSON body of each chat request when configured. Nisi's receipts hash the
-// body Nisi built; the run result reports the added field so the difference is visible.
-function withReasoningEffort(effort) {
-  if (effort === null || effort === undefined) return undefined;
-  if (!['none', 'low', 'medium', 'high'].includes(effort)) fail('REQUEST_INVALID');
-  return (url, init) => {
-    const body = JSON.parse(init.body);
-    return globalThis.fetch(url, { ...init, body: JSON.stringify({ ...body, reasoning_effort: effort }) });
+// Adds reasoning_effort when configured and refuses reasoning-only answers without promoting hidden
+// reasoning to content. Inspect the same capped stream Nisi reads; do not clone or eagerly buffer it.
+// Nisi's receipts hash the body it built; the run result reports the added field separately.
+function withReasoningEffort(effort, onReasoningOnly) {
+  const configured = effort !== null && effort !== undefined;
+  if (configured && !['none', 'low', 'medium', 'high'].includes(effort)) fail('REQUEST_INVALID');
+  return async (url, init) => {
+    if (configured) {
+      const body = JSON.parse(init.body);
+      init = { ...init, body: JSON.stringify({ ...body, reasoning_effort: effort }) };
+    }
+    const response = await globalThis.fetch(url, init);
+    if (!response.ok || !response.body?.getReader) return response;
+    const chunks = [];
+    let total = 0;
+    const inspected = response.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        total += chunk.byteLength;
+        if (total <= MAX_RESPONSE_BYTES) chunks.push(chunk);
+        else chunks.length = 0;
+        controller.enqueue(chunk);
+      },
+      flush() {
+        if (total > MAX_RESPONSE_BYTES) return; // Nisi owns the oversized-response refusal.
+        let envelope;
+        try {
+          envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
+        } catch { return; } // Leave malformed JSON and UTF-8 to Nisi's strict parser.
+        const message = envelope?.choices?.[0]?.message;
+        if ((message?.content == null || (typeof message.content === 'string' && message.content.trim() === ''))
+            && typeof message?.reasoning_content === 'string' && message.reasoning_content.trim() !== '') {
+          onReasoningOnly();
+          fail('MODEL_ANSWER_IN_REASONING');
+        }
+      },
+    }));
+    return new Response(inspected, { status: response.status, statusText: response.statusText, headers: response.headers });
   };
 }
 
-function buildAdapters(request) {
-  const fetchWithEffort = withReasoningEffort(request.reasoningEffort);
+function buildAdapters(request, onReasoningOnly) {
   const base = { destination: 'LOOPBACK_HTTP', endpoint: request.endpoint, timeoutMs: request.deadlineMs,
-    maxOutputTokens: request.maxOutputTokens, maxRequestBytes: 8 * 1024 * 1024, maxResponseBytes: 8 * 1024 * 1024,
-    ...(fetchWithEffort ? { fetch: fetchWithEffort } : {}) };
-  const innerAuthor = createLocalChatAuthorAdapter({ ...base, model: request.authorModel, id: 'agiw.author' });
-  const reviewer = createLocalChatReviewerAdapter({ ...base, model: request.reviewerModel, id: 'agiw.reviewer' });
+    maxOutputTokens: request.maxOutputTokens, maxRequestBytes: 8 * 1024 * 1024, maxResponseBytes: MAX_RESPONSE_BYTES };
+  const innerAuthor = createLocalChatAuthorAdapter({ ...base, model: request.authorModel, id: 'agiw.author',
+    fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('author')) });
+  const reviewer = createLocalChatReviewerAdapter({ ...base, model: request.reviewerModel, id: 'agiw.reviewer',
+    fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('reviewer')) });
   // Nisi's task record has a fixed schema, so the request text and current file
   // contents travel to the models as extra fields on the prompt's task object.
   const context = Object.freeze({ request: request.taskText, currentFiles: request.files });
@@ -131,7 +161,10 @@ async function main() {
   const request = await readRequest();
   const original = new Map(request.files.map(file => [file.path, file.content]));
   const syntaxByCandidate = {};
-  const { author, innerAuthor, reviewer, reviewerWithContext } = buildAdapters(request);
+  let reasoningOnlyRole = null;
+  const { author, innerAuthor, reviewer, reviewerWithContext } = buildAdapters(request, role => {
+    reasoningOnlyRole ??= role;
+  });
   const task = {
     taskId: 'agiw-mcp.run', mode: 'edit', language: request.language, allowedFiles: request.allowedFiles,
     protectedFiles: [], protectedSnapshots: {}, acceptanceCriteria: request.acceptanceCriteria,
@@ -188,6 +221,14 @@ async function main() {
     reviewers: [reviewerWithContext],
   };
   const report = await runWorkflow(task, { adapters });
+  // The pinned engine converts adapter exceptions to ADAPTER_EXCEPTION. Preserve our specific
+  // refusal outside that report, identifying only the configured role, never provider text.
+  if (reasoningOnlyRole !== null) {
+    process.stdout.write(JSON.stringify({ kind: 'agiw-mcp.nisi-run.v1',
+      error: 'MODEL_ANSWER_IN_REASONING', modelRole: reasoningOnlyRole }));
+    process.exitCode = 2;
+    return;
+  }
   const output = {
     kind: 'agiw-mcp.nisi-run.v1',
     report,
