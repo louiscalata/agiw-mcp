@@ -453,7 +453,7 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
         "acceptanceCriteria": criteria, "assertions": request["assertions"],
         "repairBudget": request["repair_budget"], "deadlineMs": request["timeout"] * 1000,
         "endpoint": config.chat_endpoint, "authorModel": config.author_model,
-        "reviewerModel": config.reviewer_model, "maxOutputTokens": config.max_output_tokens,
+        "reviewerModel": config.reviewer_model, "reviewerEndpoint": config.reviewer_chat_endpoint, "maxOutputTokens": config.max_output_tokens,
         "reasoningEffort": config.reasoning_effort,
         "language": request["language"], "python": sys.executable or "", "checkTimeoutMs": 15000,
     }

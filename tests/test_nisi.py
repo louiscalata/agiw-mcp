@@ -231,6 +231,18 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertEqual(os.listdir(temp_parent), [])
         self.assertEqual(os.getcwd(), str(project))
 
+    def test_reviewer_uses_separate_server_when_configured(self):
+        reviewer_server = FakeModelServer(models=("reviewer-model",))
+        self.addCleanup(reviewer_server.close)
+        self.write_config(model_base_url=self.models.base + "/v1", reviewer_base_url=reviewer_server.base + "/v1",
+                          author_model="author-model", reviewer_model="reviewer-model")
+        self.models.draft = lambda prompt: {"candidate": {"files": [
+            {"path": "lib.mjs", "content": "export const answer = 42;\n"}]}, "note": "New module."}
+        result = self.run_tool({"task": "Add a module.", "new_files": ["lib.mjs"], "repair_budget": 0})
+        self.assertEqual(result["outcome"], "COMPLETED", result)
+        self.assertEqual(self.models.calls, [("draft", "author-model")])
+        self.assertEqual(reviewer_server.calls, [("review", "reviewer-model")])
+
     @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_failed_probe_refuses_and_is_not_cached(self):
         marker = self.tmp / "started"

@@ -6,7 +6,10 @@ The config file is optional and closed: unknown keys are refused. Four values
 can also come from the environment so an MCP client entry can carry them:
 AGIW_MCP_BASE_URL (the legacy name AGIW_MCP_MODEL_BASE_URL is used only when
 AGIW_MCP_BASE_URL is unset), AGIW_MCP_AUTHOR_MODEL, AGIW_MCP_REVIEWER_MODEL and
-AGIW_MCP_REASONING_EFFORT. Reasoning effort accepts "none", "low", "medium" or
+AGIW_MCP_REASONING_EFFORT and AGIW_MCP_REVIEWER_BASE_URL. reviewer_base_url
+(optional, loopback only like model_base_url) sends the reviewer's chat requests
+to a different local server; when unset the reviewer uses model_base_url.
+Reasoning effort accepts "none", "low", "medium" or
 "high"; the default is unset (None), so no reasoning_effort field is added to
 Nisi's chat requests.
 require_ticket (default false) makes agiw_nisi_run refuse any request without an
@@ -39,11 +42,12 @@ DEFAULT_MAX_OUTPUT_TOKENS = 4096
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}\Z")
 _ITEM_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _JEV_MODEL = re.compile(r"jev-(?:latest|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\Z")
-_KEYS = frozenset({"model_base_url", "author_model", "reviewer_model", "keychain_service",
+_KEYS = frozenset({"model_base_url", "reviewer_base_url", "author_model", "reviewer_model", "keychain_service",
                    "keychain_account", "jev_model", "max_output_tokens", "reasoning_effort",
                    "require_ticket"})
 _ENV = {"model_base_url": "AGIW_MCP_BASE_URL", "author_model": "AGIW_MCP_AUTHOR_MODEL",
-        "reviewer_model": "AGIW_MCP_REVIEWER_MODEL", "reasoning_effort": "AGIW_MCP_REASONING_EFFORT"}
+        "reviewer_model": "AGIW_MCP_REVIEWER_MODEL", "reasoning_effort": "AGIW_MCP_REASONING_EFFORT",
+        "reviewer_base_url": "AGIW_MCP_REVIEWER_BASE_URL"}
 REASONING_EFFORTS = ("none", "low", "medium", "high")
 
 
@@ -82,21 +86,21 @@ def display_path(path) -> str:
     return text
 
 
-def validate_loopback_base_url(value) -> str:
+def validate_loopback_base_url(value, name: str = "model_base_url") -> str:
     """Accept only http://127.0.0.1[:port][/path] or http://[::1][:port][/path]."""
     if not isinstance(value, str) or not 1 <= len(value) <= 512:
-        raise ValueError("model_base_url must be a string")
+        raise ValueError(f"{name} must be a string")
     parts = urlsplit(value)
     try:
         port = parts.port
     except ValueError as exc:
-        raise ValueError("model_base_url has an invalid port") from exc
+        raise ValueError(f"{name} has an invalid port") from exc
     if (parts.scheme != "http" or parts.hostname not in ("127.0.0.1", "::1")
             or parts.username is not None or parts.password is not None
             or parts.query or parts.fragment or "\\" in value or any(ord(c) < 33 for c in value)):
-        raise ValueError("model_base_url must be http://127.0.0.1 or http://[::1] without credentials or query")
+        raise ValueError(f"{name} must be http://127.0.0.1 or http://[::1] without credentials or query")
     if port is not None and not 1 <= port <= 65535:
-        raise ValueError("model_base_url has an invalid port")
+        raise ValueError(f"{name} has an invalid port")
     return value.rstrip("/")
 
 
@@ -114,11 +118,25 @@ class Config:
     reasoning_effort: str | None = None
     # When true, agiw_nisi_run refuses requests without an admissible claim ticket (see tickets.py).
     require_ticket: bool = False
+    # Optional separate loopback server for the reviewer; None means use model_base_url.
+    reviewer_base_url: str | None = None
     source: str = "defaults"
 
     @property
     def chat_endpoint(self) -> str:
         return self.model_base_url + "/chat/completions"
+
+    @property
+    def effective_reviewer_base_url(self) -> str:
+        return self.reviewer_base_url or self.model_base_url
+
+    @property
+    def reviewer_chat_endpoint(self) -> str:
+        return self.effective_reviewer_base_url + "/chat/completions"
+
+    @property
+    def reviewer_models_endpoint(self) -> str:
+        return self.effective_reviewer_base_url + "/models"
 
     @property
     def models_endpoint(self) -> str:
@@ -129,7 +147,8 @@ class Config:
                 "reviewer_model": self.reviewer_model, "keychain_service": self.keychain_service,
                 "keychain_account": self.keychain_account, "jev_model": self.jev_model,
                 "max_output_tokens": self.max_output_tokens, "reasoning_effort": self.reasoning_effort,
-                "require_ticket": self.require_ticket, "source": self.source}
+                "require_ticket": self.require_ticket, "reviewer_base_url": self.reviewer_base_url,
+                "source": self.source}
 
 
 class ConfigError(ToolError):
@@ -141,6 +160,8 @@ def _validate(values: dict) -> dict:
     for key, value in values.items():
         if key == "model_base_url":
             out[key] = validate_loopback_base_url(value)
+        elif key == "reviewer_base_url":
+            out[key] = None if value is None else validate_loopback_base_url(value, "reviewer_base_url")
         elif key in ("author_model", "reviewer_model"):
             if value is not None and (not isinstance(value, str) or not _MODEL_ID.fullmatch(value)):
                 raise ValueError(f"{key} must be a model ID such as qwen3-coder-30b")
