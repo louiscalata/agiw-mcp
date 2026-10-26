@@ -6,6 +6,9 @@ Human commands (never used by MCP clients):
   agiw-mcp --version
   agiw-mcp readiness | status
   agiw-mcp consent show | grant | revoke
+
+Command handlers are imported when that command runs, so `--version` does not
+load the server.
 """
 from __future__ import annotations
 
@@ -42,7 +45,7 @@ def _consent_cli(action: str) -> int:
         print("To allow agiw-mcp to send the items above to TypeSafe, type the two words")
         print('"I agree" (without the quotes) and press Return. Anything else records nothing.')
         answer = input("> ")
-        # Accept the phrase with any case, surrounding quotes or a final full stop; nothing else.
+        # Trim outer whitespace, surrounding straight quotes, trailing periods, then outer whitespace.
         if answer.strip().strip("'\"").rstrip(".").strip().casefold() != "i agree":
             print('Consent was not recorded. Run the command again and type only the two words "I agree".')
             return 1

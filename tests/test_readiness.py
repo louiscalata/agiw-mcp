@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest import mock
 
-from support import FakeModelServer, IsolatedTestCase
+from support import ROOT, FakeModelServer, IsolatedTestCase
 
 from agiw_mcp import nisi, readiness, tools
 
@@ -193,6 +193,8 @@ class StatusAndModelTests(IsolatedTestCase):
         self.assertIn("port", missing["detail"].lower())
         self.assertIn("model_base_url", missing["fix"])
         self.assertIn("AGIW_MCP_BASE_URL", missing["fix"])
+        self.assertIn("http://127.0.0.1:1234/v1", missing["fix"])
+        self.assertNotIn("1235", missing["fix"])
         self.models.assert_called_once_with("http://127.0.0.1:1235/v1/models",
                                             timeout=readiness.PROBE_TIMEOUT, max_bytes=1024 * 1024)
 
@@ -225,6 +227,17 @@ class StatusAndModelTests(IsolatedTestCase):
         self.assertEqual(result["nisi"], {"version": nisi.NISI_VERSION, "verified": False,
                                          "code": "NISI_HASH_MISMATCH"})
         self.assertFalse(result["prerequisites"]["nisi"])
+
+    def test_product_text_does_not_cite_port_1235(self):
+        offenders = []
+        for path in (ROOT / "src" / "agiw_mcp").rglob("*"):
+            if not path.is_file() or "vendor" in path.parts:
+                continue
+            if ":1235" in path.read_text(encoding="utf-8", errors="replace"):
+                offenders.append(str(path.relative_to(ROOT)))
+        if ":1235" in (ROOT / "README.md").read_text(encoding="utf-8"):
+            offenders.append("README.md")
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":
