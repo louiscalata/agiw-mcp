@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 import os
+import subprocess
 import unittest
 from unittest import mock
 
@@ -15,6 +16,29 @@ FAKE_KEY = "tsk_fake_" + "0123456789abcdef"
 
 
 class KeyTests(IsolatedTestCase):
+    def test_clean_trims_one_crlf_or_lf(self):
+        for ending in (b"", b"\n", b"\r\n"):
+            with self.subTest(ending=ending):
+                self.assertEqual(keys._clean(FAKE_KEY.encode() + ending), FAKE_KEY)
+        for raw in (FAKE_KEY.encode() + b"\n\n", FAKE_KEY.encode() + b"\r", b"\xff"):
+            with self.subTest(raw=raw), self.assertRaises(keys.KeyUnavailable) as ctx:
+                keys._clean(raw)
+            self.assertEqual(str(ctx.exception), keys.KEY_UNAVAILABLE_MESSAGE)
+
+    def test_run_read_refuses_non_utf8_and_oversized_output(self):
+        for raw in (b"\xff", b"x" * 4097):
+            done = subprocess.CompletedProcess(["fake-keystore"], 0, stdout=raw)
+            with self.subTest(size=len(raw)), mock.patch.object(keys.subprocess, "run", return_value=done), \
+                    self.assertRaises(keys.KeyUnavailable) as ctx:
+                keys._run_read(["fake-keystore"])
+            self.assertEqual(str(ctx.exception), keys.KEY_UNAVAILABLE_MESSAGE)
+
+    def test_run_read_trims_line_endings(self):
+        for ending in (b"\n", b"\r\n"):
+            done = subprocess.CompletedProcess(["fake-keystore"], 0, stdout=FAKE_KEY.encode() + ending)
+            with self.subTest(ending=ending), mock.patch.object(keys.subprocess, "run", return_value=done):
+                self.assertEqual(keys._run_read(["fake-keystore"]), FAKE_KEY)
+
     def fake_tool(self, name, script):
         path = self.tmp / "bin" / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,6 +169,69 @@ class ConsentTests(IsolatedTestCase):
 
 
 class ConfigTests(IsolatedTestCase):
+    def test_config_file_parse_errors(self):
+        path = self.config_dir / "config.json"
+        path.parent.mkdir()
+        for raw in (b" " * (config.MAX_CONFIG_BYTES + 1), b"\xff", b"{broken", b"[]",
+                    b'{"author_model":"a","author_model":"b"}'):
+            with self.subTest(raw=raw[:80]):
+                path.write_bytes(raw)
+                with self.assertRaises(ConfigError) as ctx:
+                    load_config()
+                self.assertEqual(ctx.exception.code, "CONFIG_INVALID")
+        path.write_bytes(b"{}" + b" " * (config.MAX_CONFIG_BYTES - 2))
+        self.assertEqual(load_config().source, "defaults")
+
+    def test_config_unreadable(self):
+        with mock.patch("builtins.open", side_effect=PermissionError("private path")), \
+                self.assertRaises(ConfigError) as ctx:
+            load_config()
+        self.assertEqual(ctx.exception.code, "CONFIG_UNREADABLE")
+        self.assertNotIn("private path", ctx.exception.message)
+
+    def test_base_url_precedence(self):
+        self.assertEqual(load_config().model_base_url, config.DEFAULT_BASE_URL)
+        self.write_config(model_base_url="http://127.0.0.1:1235/v1")
+        self.assertEqual(load_config().model_base_url, "http://127.0.0.1:1235/v1")
+        os.environ["AGIW_MCP_MODEL_BASE_URL"] = "http://127.0.0.1:2345/v1"
+        self.assertEqual(load_config().model_base_url, "http://127.0.0.1:2345/v1")
+        os.environ["AGIW_MCP_BASE_URL"] = "http://[::1]:3456/v1/"
+        os.environ["AGIW_MCP_AUTHOR_MODEL"] = "environment-author"
+        cfg = load_config()
+        self.assertEqual(cfg.model_base_url, "http://[::1]:3456/v1")
+        self.assertEqual(cfg.source, "file+env")
+        del os.environ["AGIW_MCP_MODEL_BASE_URL"]
+        self.assertEqual(load_config().model_base_url, "http://[::1]:3456/v1")
+        (self.config_dir / "config.json").unlink()
+        self.assertEqual(load_config().source, "env")
+        self.assertEqual(load_config().model_base_url, "http://[::1]:3456/v1")
+
+    def test_environment_base_urls_keep_loopback_validation(self):
+        self.write_config(model_base_url="http://127.0.0.1:1235/v1")
+        for name in ("AGIW_MCP_BASE_URL", "AGIW_MCP_MODEL_BASE_URL"):
+            for value in ("http://192.0.2.10:1234/v1", "https://127.0.0.1/v1", "http://localhost:1235/v1",
+                          "http://user:pw@127.0.0.1/v1", "http://127.0.0.1/v1?x=1",
+                          "http://127.0.0.1:65536/v1", "http://[::1]:0/v1", "http://127.0.0.1/v1#x"):
+                with self.subTest(name=name, value=value), mock.patch.dict(os.environ, {name: value}):
+                    with self.assertRaises(ConfigError) as ctx:
+                        load_config()
+                    self.assertEqual(ctx.exception.code, "CONFIG_INVALID")
+
+    def test_multiple_environment_overrides_preserve_file_source(self):
+        self.write_config(reviewer_model="file-reviewer")
+        os.environ["AGIW_MCP_MODEL_BASE_URL"] = "http://127.0.0.1:1235/v1"
+        os.environ["AGIW_MCP_AUTHOR_MODEL"] = "environment-author"
+        cfg = load_config()
+        self.assertEqual(cfg.source, "file+env")
+        self.assertEqual(cfg.reviewer_model, "file-reviewer")
+        self.assertEqual(cfg.author_model, "environment-author")
+
+    def test_preferred_base_url_overrides_invalid_legacy_url(self):
+        self.write_config(model_base_url="http://127.0.0.1:1234/v1")
+        os.environ["AGIW_MCP_MODEL_BASE_URL"] = "https://localhost/v1"
+        os.environ["AGIW_MCP_BASE_URL"] = "http://127.0.0.1:1235/v1"
+        self.assertEqual(load_config().model_base_url, "http://127.0.0.1:1235/v1")
+
     def test_defaults(self):
         cfg = load_config()
         self.assertEqual(cfg.model_base_url, "http://127.0.0.1:1234/v1")

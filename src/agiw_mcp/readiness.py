@@ -93,6 +93,13 @@ def check_models(config: Config) -> dict:
                       "or set model_base_url to the address it listens on.")
     data = body.get("data") if isinstance(body, dict) else None
     listed = {item.get("id") for item in data if isinstance(item, dict)} if isinstance(data, list) else set()
+    if author not in listed and reviewer not in listed:
+        return _check("models", False,
+                      f"{config.models_endpoint} lists neither author_model {author!r} nor reviewer_model "
+                      f"{reviewer!r}; a different server may be on that port.",
+                      "Set model_base_url in config.json or AGIW_MCP_BASE_URL in the MCP client's environment "
+                      "to your model server's base URL (for example http://127.0.0.1:1235/v1), "
+                      "then load the configured models there or choose model IDs it lists.")
     for role, model in (("author_model", author), ("reviewer_model", reviewer)):
         if model not in listed:
             return _check("models", False, f"{role} {model!r} is not listed by {config.models_endpoint}",
