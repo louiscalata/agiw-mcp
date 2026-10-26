@@ -135,12 +135,24 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     req = urllib.request.Request(url, data=data, method=method, headers=all_headers)
     outcome: dict = {}
     capture = _SocketBox()
+    expired = threading.Event()
 
     def exchange() -> None:
         try:
             with _opener(capture).open(req, timeout=timeout) as resp:
                 capture.remember(getattr(getattr(resp, "fp", None), "raw", None))
-                outcome["raw"] = resp.read(max_bytes + 1)
+                # Read in pieces and check the deadline between them: on macOS, shutting the socket down
+                # does not reliably wake a read while the server keeps sending, so a trickling server could
+                # otherwise hold the worker past the deadline.
+                chunks: list[bytes] = []
+                size = 0
+                while size <= max_bytes and not expired.is_set():
+                    chunk = resp.read1(max_bytes + 1 - size)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    size += len(chunk)
+                outcome["raw"] = b"".join(chunks)
                 outcome["status"] = resp.status
         except BaseException as exc:  # noqa: B036 - handed to the caller's thread below
             outcome["error"] = exc
@@ -151,6 +163,7 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     if worker.is_alive():
         # Closing the socket unblocks a read that a trickling server would otherwise keep open, and the
         # join collects the worker so neither the thread nor the socket is left behind.
+        expired.set()
         capture.close()
         worker.join(1.0)
         # The deadline passed. Closing the socket can end the read with a clean EOF instead of an error

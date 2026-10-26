@@ -135,7 +135,7 @@ class NetTests(IsolatedTestCase):
             def __exit__(self, *exc):
                 return False
 
-            def read(self, _amt):
+            def read1(self, _amt):
                 closed.wait(5)
                 return b"  "
 
