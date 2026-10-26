@@ -6,8 +6,9 @@
 // temporary directory and starts it there with Node's permission model. It reads
 // one JSON request on stdin and writes one JSON result on stdout. Candidate code
 // is parsed by fixed checkers (node --check, Python's ast.parse, JSON.parse) and
-// is never executed. The only network destination is the configured loopback
-// chat endpoint, enforced by Nisi's local-chat adapter.
+// is never executed. The only network destinations are the configured loopback
+// chat endpoints (author, and the reviewer's if it differs), enforced by Nisi's
+// local-chat adapter.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runWorkflow } from './nisi/package/workflow/engine.mjs';
@@ -142,7 +143,10 @@ function buildAdapters(request, onReasoningOnly) {
     maxOutputTokens: request.maxOutputTokens, maxRequestBytes: 8 * 1024 * 1024, maxResponseBytes: MAX_RESPONSE_BYTES };
   const innerAuthor = createLocalChatAuthorAdapter({ ...base, model: request.authorModel, id: 'agiw.author',
     fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('author')) });
-  const reviewer = createLocalChatReviewerAdapter({ ...base, model: request.reviewerModel, id: 'agiw.reviewer',
+  // reviewerEndpoint lets the reviewer use a separate loopback server; it falls back to the author's endpoint.
+  const reviewerEndpoint = typeof request.reviewerEndpoint === 'string' && request.reviewerEndpoint
+    ? request.reviewerEndpoint : request.endpoint;
+  const reviewer = createLocalChatReviewerAdapter({ ...base, endpoint: reviewerEndpoint, model: request.reviewerModel, id: 'agiw.reviewer',
     fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('reviewer')) });
   // Nisi's task record has a fixed schema, so the request text and current file
   // contents travel to the models as extra fields on the prompt's task object.
