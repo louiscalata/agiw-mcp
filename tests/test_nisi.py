@@ -85,6 +85,47 @@ class ProbeEnvTests(IsolatedTestCase):
         env = self.probe_env("posix", {**self.WINDOWS, **self.SECRETS, "PATH": "/usr/bin"})
         self.assertEqual(env, {"PATH": "/usr/bin", "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"})
 
+    def test_child_env_on_windows_passes_system_vars_only(self):
+        windows = {"PATH": r"C:\Windows\System32", "systemroot": r"C:\Windows", "SystemDrive": "C:",
+                   "windir": r"C:\Windows", "TYPESAFE_API_KEY": "secret-value-123",
+                   "ComSpec": r"C:\Windows\system32\cmd.exe"}
+        with mock.patch.dict(os.environ, windows, clear=True), mock.patch.object(nisi.os, "name", "nt"):
+            env = nisi._child_env(r"C:\node\node.exe", r"C:\work")
+        self.assertEqual(set(env), {"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "NODE_NO_WARNINGS",
+                                    "SystemRoot", "SYSTEMDRIVE", "WINDIR"})
+        self.assertEqual(env["SystemRoot"], r"C:\Windows")
+        self.assertEqual(env["SYSTEMDRIVE"], "C:")
+        self.assertNotIn("secret-value-123", env.values())
+        self.assertEqual((env["HOME"], env["TMPDIR"], env["TMP"], env["TEMP"]), (r"C:\work",) * 4)
+
+    def test_windows_cmd_shim_resolves_to_node_exe(self):
+        folder = self.tmp / "nodebin"
+        folder.mkdir()
+        (folder / "node.cmd").write_text("@echo off\n", encoding="utf-8")
+        exe = folder / "node.exe"
+        exe.write_bytes(b"MZ")
+        with mock.patch.object(nisi.os, "name", "nt"):
+            self.assertEqual(nisi._windows_node_exe(str(folder / "node.cmd")), str(exe))
+            self.assertEqual(nisi._windows_node_exe(str(exe)), str(exe))
+
+    def test_windows_spawn_does_not_set_process_group(self):
+        with mock.patch.object(nisi.os, "name", "nt"), \
+                mock.patch.object(nisi.subprocess, "Popen", side_effect=OSError("boom")) as popen:
+            with self.assertRaises(OSError):
+                nisi._bounded_run(["node"], data=b"", cwd=".", env={}, timeout=1)
+        self.assertNotIn("creationflags", popen.call_args.kwargs)
+        self.assertNotIn("start_new_session", popen.call_args.kwargs)
+
+    def test_windows_permission_paths_use_forward_slashes(self):
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        done = subprocess.CompletedProcess(["node", "--help"], 0, b"  --permission\n", b"")
+        with mock.patch.object(nisi.os, "name", "nt"), mock.patch.object(nisi.subprocess, "run", return_value=done):
+            flags, sandbox = nisi.permission_flags(r"C:\node\node.exe", r"C:\work\dir")
+        self.assertEqual(sandbox, "node-permission")
+        self.assertIn("--allow-fs-read=C:/work/dir", flags)
+        self.assertIn("--allow-fs-write=C:/work/dir", flags)
+
     def test_windows_failed_help_probe_still_refuses(self):
         nisi._FLAG_CACHE.clear()
         self.addCleanup(nisi._FLAG_CACHE.clear)
@@ -266,7 +307,6 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertFalse(marker.exists(), "Node was started without a sandbox")
         self.assertEqual(os.listdir(parent), [])
 
-    @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_child_env_is_exactly_the_documented_set(self):
         # Grok's delta review: nothing pinned the runner environment, so a key could have leaked into it.
         for name in ("TYPESAFE_API_KEY", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "SYSTEMROOT", "WINDIR"):
@@ -274,9 +314,10 @@ class NisiEndToEndTests(IsolatedTestCase):
         env = nisi._child_env("/opt/node/bin/node", "/tmp/work")
         expected = {"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "NODE_NO_WARNINGS"}
         if os.name == "nt":
-            expected |= {"SYSTEMROOT", "WINDIR"}
+            expected |= set(nisi._windows_process_env())
         self.assertEqual(set(env), expected)
-        self.assertNotIn("secret-value-123", {value for key, value in env.items() if key not in ("SYSTEMROOT", "WINDIR")})
+        kept = set(nisi._PROBE_WINDOWS_NAMES)
+        self.assertNotIn("secret-value-123", {value for key, value in env.items() if key not in kept})
         self.assertEqual((env["HOME"], env["TMPDIR"], env["TMP"], env["TEMP"]), ("/tmp/work",) * 4)
         self.assertEqual((env["LANG"], env["NODE_NO_WARNINGS"]), ("C.UTF-8", "1"))
 

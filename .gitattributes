@@ -1,0 +1,3 @@
+# Keep the bytes the Nisi manifest hashes, and every other text file, as LF.
+# Windows Git otherwise checks out CRLF and verification fails.
+* text=auto eol=lf
