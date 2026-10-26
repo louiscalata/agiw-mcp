@@ -271,6 +271,9 @@ def validate_request(args: dict) -> dict:
     if len(set(new_files)) != len(new_files) or set(new_files) & seen:
         raise ToolError("INPUT_INVALID", "new_files must be unique and must not repeat a path from files.")
     allowed = sorted(seen | set(new_files))
+    # Each list is capped above; the cap also applies to the union, or 64 files plus 64 new files would pass.
+    if len(allowed) > MAX_FILES:
+        raise ToolError("INPUT_INVALID", f"files and new_files together may name at most {MAX_FILES} paths.")
     if not allowed:
         raise ToolError("INPUT_INVALID", "Provide at least one file in files or one path in new_files.")
     criteria = args.get("acceptance_criteria", [])

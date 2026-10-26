@@ -81,8 +81,11 @@ def handle(message):
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return _error(None, INVALID_REQUEST, "Invalid Request")
     if "method" not in message:
-        # A response to a server request; this server sends none, so ignore it.
-        return None
+        # A response to a server request; this server sends none, so ignore it. Anything else parsed as JSON
+        # but is not a request or a response, and must not be dropped without an error.
+        if _looks_like_response(message):
+            return None
+        return _error(None, PARSE_ERROR, "Parse error")
     method = message.get("method")
     has_id = "id" in message
     identifier = message.get("id")
@@ -136,6 +139,16 @@ def _valid_id(identifier) -> bool:
         except UnicodeError:
             return False
     return False
+
+
+def _looks_like_response(message: dict) -> bool:
+    """True for a JSON-RPC response: an id, and exactly one of result or error."""
+    if set(message) - {"jsonrpc", "id", "result", "error"} or "id" not in message:
+        return False
+    identifier = message["id"]
+    if identifier is not None and not _valid_id(identifier):
+        return False
+    return ("result" in message) != ("error" in message)
 
 
 def encode(message: dict) -> bytes:

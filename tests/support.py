@@ -219,10 +219,37 @@ def jev_answers(phase: str, values: dict | None = None, model: str = "jev-1.14.0
     return {"model": model, "answers": answers, "usage": {"input_tokens": 100, "output_tokens": 10}}
 
 
-def node_available() -> bool:
+def node_availability() -> tuple[bool, str]:
+    """Whether Node 22+ can run a Nisi probe, and the skip reason when it cannot.
+
+    A missing binary, an old version, or a failed ``node --help`` probe all mean Node is unavailable.
+    Callers skip with ``reason`` instead of failing the test.
+    """
+    # Local import: this module installs its socket guard before agiw_mcp is loaded.
     from agiw_mcp import nisi
+    from agiw_mcp.errors import ToolError
     path, version = nisi.find_node()
-    return bool(path and version and version >= nisi.MIN_NODE)
+    if not path or not version or version < nisi.MIN_NODE:
+        return False, "Node.js 22+ is not available (node was not found on PATH or did not report version 22+)"
+    try:
+        nisi.permission_flags(path, os.devnull)
+    except ToolError as exc:
+        if exc.code == "NODE_UNAVAILABLE":
+            return False, "Node.js is not available: " + exc.message
+        raise
+    return True, ""
+
+
+def node_available() -> bool:
+    return node_availability()[0]
+
+
+def skip_without_node(cls):
+    """Skip a test class when Node cannot be probed, with the reason from ``node_availability``."""
+    available, reason = node_availability()
+    if available:
+        return cls
+    return unittest.skip(reason)(cls)
 
 
 def write_fake_node(directory: Path, body: str) -> Path:

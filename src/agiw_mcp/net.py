@@ -8,7 +8,9 @@ is not a loopback literal is refused before a socket opens.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -51,10 +53,70 @@ def guard(url: str) -> None:
         raise NetworkRefused("test mode refuses non-loopback URLs")
 
 
-def _opener():
+class _SocketBox:
+    """Sockets for the in-flight exchange, so a deadline can close them from the caller."""
+
+    def __init__(self) -> None:
+        self._socks: list = []
+        self._lock = threading.Lock()
+
+    def remember(self, sock) -> None:
+        if sock is None:
+            return
+        with self._lock:
+            if sock not in self._socks:
+                self._socks.append(sock)
+
+    def close(self) -> None:
+        with self._lock:
+            socks = list(self._socks)
+        for sock in socks:
+            shutdown = getattr(sock, "shutdown", None)
+            if shutdown is not None:
+                try:
+                    shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+def _connection_class(capture: _SocketBox, base):
+    class Connection(base):
+        def connect(self) -> None:
+            super().connect()
+            capture.remember(self.sock)
+
+    return Connection
+
+
+class _CapturingHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, capture: _SocketBox):
+        super().__init__()
+        self._capture = capture
+
+    def http_open(self, req):
+        return self.do_open(_connection_class(self._capture, http.client.HTTPConnection), req)
+
+
+class _CapturingHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, capture: _SocketBox):
+        super().__init__()
+        self._capture = capture
+
+    def https_open(self, req):
+        return self.do_open(_connection_class(self._capture, http.client.HTTPSConnection), req)
+
+
+def _opener(capture: _SocketBox | None = None):
     # Never use HTTP(S)_PROXY or system proxies: loopback traffic stays local, and the Jev request goes
     # straight to the endpoint named in the consent disclosure.
-    return urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}))
+    handlers = [_NoRedirect(), urllib.request.ProxyHandler({})]
+    if capture is not None:
+        handlers.extend((_CapturingHTTPHandler(capture), _CapturingHTTPSHandler(capture)))
+    return urllib.request.build_opener(*handlers)
 
 
 def request_json(url: str, *, method: str = "GET", body: dict | None = None, headers: dict | None = None,
@@ -72,10 +134,12 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     all_headers.update(headers or {})
     req = urllib.request.Request(url, data=data, method=method, headers=all_headers)
     outcome: dict = {}
+    capture = _SocketBox()
 
     def exchange() -> None:
         try:
-            with _opener().open(req, timeout=timeout) as resp:
+            with _opener(capture).open(req, timeout=timeout) as resp:
+                capture.remember(getattr(getattr(resp, "fp", None), "raw", None))
                 outcome["raw"] = resp.read(max_bytes + 1)
                 outcome["status"] = resp.status
         except BaseException as exc:  # noqa: B036 - handed to the caller's thread below
@@ -85,8 +149,11 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     worker.start()
     worker.join(timeout)
     if worker.is_alive():
-        # Abandoned: a worker still blocked on a trickling server ends when that server stops or closes,
-        # and nothing it reads is used.
+        # Closing the socket unblocks a read that a trickling server would otherwise keep open, and the
+        # join collects the worker so neither the thread nor the socket is left behind.
+        capture.close()
+        worker.join(1.0)
+    if worker.is_alive():
         raise HttpFailure("unreachable")
     try:
         if "error" in outcome:
@@ -101,7 +168,7 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
         except Exception:
             pass
         raise HttpFailure("http", status) from None
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
         raise HttpFailure("unreachable") from None
     if len(raw) > max_bytes:
         raise HttpFailure("too_large", status)
