@@ -112,7 +112,9 @@ uvx --from git+https://github.com/louiscalata/agiw-mcp agiw-mcp --version
 All keys in `config.json` are optional; unknown keys are refused. Besides the three
 shown in the quick start: `keychain_service` (default `agiw-mcp`), `keychain_account`
 (default `typesafe`), `jev_model` (default `jev-1.14.0`), `max_output_tokens`
-(default 4096) and `reasoning_effort` (unset by default).
+(default 4096), `reasoning_effort` (unset by default) and `require_ticket` (default `false`).
+
+`require_ticket: true` makes `agiw_nisi_run` refuse any request without a claim ticket.
 
 `reasoning_effort` (`none`, `low`, `medium` or `high`) is added to each Nisi chat request. Set it
 to `none` for reasoning models such as Qwen 3 or Granite 4 on LM Studio: under JSON-schema output they
@@ -236,7 +238,29 @@ If the client cannot find `agiw-mcp`, use the absolute path that
 `agiw_nisi_run` takes `task` (required), `files` (a list of `{path, content}` with
 relative paths), `new_files` (paths the author may create), `acceptance_criteria`,
 `assertions` (`{path, contains}` or `{path, not_contains}`), `repair_budget` (0 to 3,
-default 1) and `timeout_seconds` (30 to 1800, default 600).
+default 1), `timeout_seconds` (30 to 1800, default 600) and an optional `ticket`.
+
+A `ticket` is `{ticketId, claimState, writeScope, owner}`. Only `claimState` `Granted` or
+`Active` is admitted; `writeScope` is a list of scope keys or `/`-separated paths. Before
+Node is started or a temporary folder is created, the ticket is admitted all-or-nothing: it
+is refused (`TICKET_SCOPE_CONFLICT`) if any scope equals, contains or is contained in a scope
+of a ticket already admitted, by this or another agiw-mcp process. Scopes are compared
+ignoring case and Unicode normalization (`README.md` and `readme.MD` are the same scope).
+Scope parts that Windows would alias are refused (`TICKET_INVALID`) rather than normalized:
+parts ending in `.` or a space (`calc.py.`), parts containing `:`, and device names such as
+`CON`, `NUL`, `COM1` or `LPT1` with any extension. The ticket is released when the run ends.
+Admission state lives in `tickets/` under the config directory, or in `AGIW_MCP_TICKET_DIR`
+(an absolute path). On macOS and Linux that directory must not be a symlink and must be owned
+by you with mode `0700` (a looser mode is tightened if possible), and every directory above
+it, including through symlinks, must be owned by you or root and not writable by group or
+others unless sticky (like `/tmp`); otherwise admission is refused (`TICKET_REGISTRY_UNSAFE`).
+A run's locks are released only from the directory they were created in. Locks left by a
+crashed process are not cleaned up automatically; they refuse later admissions until removed.
+On Windows, ticket admission is disabled for now: any ticket is refused
+(`TICKET_UNSUPPORTED_PLATFORM`) before the state directory is touched, until agiw-mcp can
+check the directory for reparse points, ownership and permissions. Runs without a ticket
+still work on Windows unless `require_ticket` is `true`.
+Refusals name only the ticket id.
 
 Its static checks parse Python (`ast.parse`), JavaScript (`node --check`) and JSON;
 other file types get structural checks only, and the result says which files were

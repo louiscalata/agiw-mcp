@@ -7,7 +7,7 @@ import os
 import platform
 import sys
 
-from . import SERVER_NAME, __version__, consent, jev, keys, nisi, readiness
+from . import SERVER_NAME, __version__, consent, jev, keys, nisi, readiness, tickets
 from .config import Config, ConfigError, config_dir, config_file_path, display_path, load_config
 from .errors import ToolError
 
@@ -19,6 +19,15 @@ _ASSERTION = {"type": "object", "properties": {"path": {"type": "string"},
                                                "contains": {"type": "string", "maxLength": 2048},
                                                "not_contains": {"type": "string", "maxLength": 2048}},
               "required": ["path"], "additionalProperties": False}
+_TICKET = {"type": "object", "properties": {
+    "ticketId": {"type": "string", "maxLength": 128},
+    "claimState": {"type": "string", "description": "Only Granted or Active is admitted."},
+    "writeScope": {"type": "array", "minItems": 1, "maxItems": tickets.MAX_SCOPES,
+                   "items": {"type": "string", "maxLength": tickets.MAX_SCOPE_CHARS}},
+    "owner": {"type": "string", "maxLength": tickets.MAX_OWNER_CHARS}},
+    "required": ["ticketId", "claimState", "writeScope", "owner"], "additionalProperties": False,
+    "description": ("Optional claim ticket (required when config require_ticket is true). Admitted before the "
+                    "run starts, refused if its write scope overlaps an admitted ticket, released afterwards.")}
 
 TOOLS = [
     {
@@ -95,7 +104,8 @@ TOOLS = [
             "assertions": {"type": "array", "maxItems": nisi.MAX_ASSERTIONS, "items": _ASSERTION},
             "repair_budget": {"type": "integer", "minimum": 0, "maximum": 3, "default": 1},
             "timeout_seconds": {"type": "integer", "minimum": 30, "maximum": 1800,
-                                "default": nisi.DEFAULT_TIMEOUT_SECONDS}},
+                                "default": nisi.DEFAULT_TIMEOUT_SECONDS},
+            "ticket": _TICKET},
             "required": ["task"], "additionalProperties": False},
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
