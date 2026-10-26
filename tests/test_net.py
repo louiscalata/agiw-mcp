@@ -116,5 +116,38 @@ class NetTests(IsolatedTestCase):
         self.assertTrue(released.wait(2), "timed-out request left the server socket open")
 
 
+    def test_clean_eof_after_the_deadline_is_not_parsed(self):
+        # On macOS, closing the socket at the deadline can end the worker's read with a clean EOF, so
+        # the read returns the truncated body instead of raising.
+        closed = threading.Event()
+
+        class Sock:
+            def close(self):
+                closed.set()
+
+        class Response:
+            status = 200
+            fp = None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self, _amt):
+                closed.wait(5)
+                return b"  "
+
+        def opener(capture=None):
+            capture.remember(Sock())
+            return mock.Mock(open=mock.Mock(return_value=Response()))
+
+        with mock.patch.object(net, "_opener", side_effect=opener):
+            with self.assertRaises(net.HttpFailure) as ctx:
+                net.request_json("http://127.0.0.1:1235/x", timeout=0.2, max_bytes=8192)
+        self.assertEqual(ctx.exception.kind, "unreachable")
+
+
 if __name__ == "__main__":
     unittest.main()

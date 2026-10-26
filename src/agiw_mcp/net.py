@@ -153,7 +153,8 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
         # join collects the worker so neither the thread nor the socket is left behind.
         capture.close()
         worker.join(1.0)
-    if worker.is_alive():
+        # The deadline passed. Closing the socket can end the read with a clean EOF instead of an error
+        # (macOS does this), leaving a truncated body in ``outcome``; it must not be parsed as a reply.
         raise HttpFailure("unreachable")
     try:
         if "error" in outcome:
