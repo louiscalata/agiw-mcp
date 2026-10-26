@@ -54,6 +54,50 @@ class NisiInputTests(IsolatedTestCase):
         self.assertEqual(ctx.exception.code, "MODELS_NOT_DISTINCT")
 
 
+class ProbeEnvTests(IsolatedTestCase):
+    """Node 24 on Windows exits 134 (CSPRNG assertion) during the probes when SystemRoot is dropped."""
+
+    SECRETS = {"TYPESAFE_API_KEY": "secret-value-123", "ANTHROPIC_API_KEY": "secret-value-123",
+               "GITHUB_TOKEN": "secret-value-123", "HTTP_PROXY": "secret-value-123",
+               "HTTPS_PROXY": "secret-value-123", "https_proxy": "secret-value-123",
+               "NO_PROXY": "secret-value-123", "ALL_PROXY": "secret-value-123", "HOME": "/home/someone"}
+    WINDOWS = {"PATH": r"C:\node", "systemroot": r"C:\Windows", "SystemDrive": "C:", "windir": r"C:\Windows"}
+
+    def probe_env(self, os_name, environ):
+        with mock.patch.dict(os.environ, environ, clear=True), mock.patch.object(nisi.os, "name", os_name):
+            return nisi._probe_env()
+
+    def test_windows_keeps_system_vars_case_insensitively(self):
+        env = self.probe_env("nt", self.WINDOWS)
+        self.assertEqual(env, {"PATH": r"C:\node", "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1",
+                               "SystemRoot": r"C:\Windows", "SYSTEMDRIVE": "C:", "WINDIR": r"C:\Windows"})
+
+    def test_windows_still_strips_keys_and_proxies(self):
+        env = self.probe_env("nt", {**self.WINDOWS, **self.SECRETS})
+        self.assertEqual(set(env), {"PATH", "LANG", "NODE_NO_WARNINGS", "SystemRoot", "SYSTEMDRIVE", "WINDIR"})
+        self.assertNotIn("secret-value-123", env.values())
+
+    def test_windows_omits_unset_system_vars(self):
+        self.assertEqual(self.probe_env("nt", {"PATH": r"C:\node", "WINDIR": ""}),
+                         {"PATH": r"C:\node", "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"})
+
+    def test_posix_is_unchanged(self):
+        env = self.probe_env("posix", {**self.WINDOWS, **self.SECRETS, "PATH": "/usr/bin"})
+        self.assertEqual(env, {"PATH": "/usr/bin", "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"})
+
+    def test_windows_failed_help_probe_still_refuses(self):
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        crashed = subprocess.CompletedProcess(["node", "--help"], 134, b"", b"")
+        with mock.patch.dict(os.environ, self.WINDOWS, clear=True), mock.patch.object(nisi.os, "name", "nt"), \
+                mock.patch.object(nisi.subprocess, "run", return_value=crashed) as run:
+            with self.assertRaises(ToolError) as ctx:
+                nisi.permission_flags(r"C:\node\node.exe", r"C:\work")
+        self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
+        self.assertNotIn(r"C:\node\node.exe", nisi._FLAG_CACHE)
+        self.assertEqual(run.call_args.kwargs["env"]["SystemRoot"], r"C:\Windows")
+
+
 @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
 class FakeRunnerTests(IsolatedTestCase):
     """Exercises the Python side with a stand-in for node (used where Node is unavailable)."""
