@@ -79,6 +79,75 @@ class NetTests(IsolatedTestCase):
         self.assertEqual(ctx.exception.kind, "unreachable")
         self.assertLess(elapsed, 2.0)
 
+    def test_timeout_closes_the_worker_and_the_socket(self):
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        released = threading.Event()
+
+        def trickle():
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                released.set()
+                return
+            with conn:
+                try:
+                    conn.recv(65536)
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                 b"Content-Length: 4096\r\n\r\n")
+                    while True:
+                        conn.sendall(b" ")
+                        time.sleep(0.05)
+                except OSError:
+                    pass
+            released.set()
+
+        thread = threading.Thread(target=trickle, daemon=True)
+        thread.start()
+        self.addCleanup(listener.close)
+        before = [item for item in threading.enumerate() if item.name == "agiw-mcp-http" and item.is_alive()]
+        with self.assertRaises(net.HttpFailure) as ctx:
+            net.request_json(f"http://127.0.0.1:{port}/v1/models", timeout=0.4, max_bytes=8192)
+        self.assertEqual(ctx.exception.kind, "unreachable")
+        self.assertEqual(before, [])
+        self.assertFalse(any(item.name == "agiw-mcp-http" and item.is_alive() for item in threading.enumerate()))
+        self.assertTrue(released.wait(2), "timed-out request left the server socket open")
+
+
+    def test_clean_eof_after_the_deadline_is_not_parsed(self):
+        # On macOS, closing the socket at the deadline can end the worker's read with a clean EOF, so
+        # the read returns the truncated body instead of raising.
+        closed = threading.Event()
+
+        class Sock:
+            def close(self):
+                closed.set()
+
+        class Response:
+            status = 200
+            fp = None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read1(self, _amt):
+                closed.wait(5)
+                return b"  "
+
+        def opener(capture=None):
+            capture.remember(Sock())
+            return mock.Mock(open=mock.Mock(return_value=Response()))
+
+        with mock.patch.object(net, "_opener", side_effect=opener):
+            with self.assertRaises(net.HttpFailure) as ctx:
+                net.request_json("http://127.0.0.1:1235/x", timeout=0.2, max_bytes=8192)
+        self.assertEqual(ctx.exception.kind, "unreachable")
+
 
 if __name__ == "__main__":
     unittest.main()

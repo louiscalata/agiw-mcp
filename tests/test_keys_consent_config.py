@@ -332,10 +332,41 @@ class ConfigTests(IsolatedTestCase):
     def test_per_os_config_dir(self):
         del os.environ["AGIW_MCP_CONFIG_DIR"]
         with mock.patch.object(config.sys, "platform", "darwin"):
-            self.assertTrue(str(config.config_dir()).endswith("Library/Application Support/agiw-mcp"))
+            self.assertEqual(config.config_dir(),
+                             config.Path.home() / "Library" / "Application Support" / "agiw-mcp")
         with mock.patch.object(config.sys, "platform", "linux"), mock.patch.object(config.os, "name", "posix"):
             os.environ["XDG_CONFIG_HOME"] = str(self.tmp / "xdg")
             self.assertEqual(config.config_dir(), self.tmp / "xdg" / "agiw-mcp")
+
+    def test_windows_config_dir_and_display_path(self):
+        # pathlib.Path follows os.name, so a real WindowsPath cannot be built on POSIX. A stand-in
+        # exercises the APPDATA branch; display_path is checked with both separators below.
+        class Path:
+            def __init__(self, *parts):
+                self.parts = tuple(str(part) for part in parts)
+
+            def __truediv__(self, other):
+                extra = other.parts if isinstance(other, Path) else (str(other),)
+                return Path(*self.parts, *extra)
+
+            def __eq__(self, other):
+                return isinstance(other, Path) and self.parts == other.parts
+
+            @classmethod
+            def home(cls):
+                return cls(r"C:\Users\louis")
+
+        del os.environ["AGIW_MCP_CONFIG_DIR"]
+        with mock.patch.object(config, "Path", Path), mock.patch.object(config.sys, "platform", "win32"), \
+                mock.patch.object(config.os, "name", "nt"):
+            os.environ["APPDATA"] = r"C:\Users\louis\AppData\Roaming"
+            self.assertEqual(config.config_dir(), Path(r"C:\Users\louis\AppData\Roaming", "agiw-mcp"))
+            del os.environ["APPDATA"]
+            self.assertEqual(config.config_dir(), Path(r"C:\Users\louis", "AppData", "Roaming", "agiw-mcp"))
+        home = str(config.Path.home())
+        self.assertEqual(config.display_path(home + "\\x\\y"), "~\\x\\y")
+        self.assertEqual(config.display_path(home + "/x/y"), "~/x/y")
+        self.assertEqual(config.display_path(r"D:\opt\tool"), r"D:\opt\tool")
 
 
 class NetworkGuardTests(IsolatedTestCase):
