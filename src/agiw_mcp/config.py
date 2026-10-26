@@ -2,9 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration, the per-OS config directory and private file writes.
 
-The config file is optional and closed: unknown keys are refused. Three values
+The config file is optional and closed: unknown keys are refused. Four values
 can also come from the environment so an MCP client entry can carry them:
-AGIW_MCP_MODEL_BASE_URL, AGIW_MCP_AUTHOR_MODEL and AGIW_MCP_REVIEWER_MODEL.
+AGIW_MCP_BASE_URL (the legacy name AGIW_MCP_MODEL_BASE_URL is used only when
+AGIW_MCP_BASE_URL is unset), AGIW_MCP_AUTHOR_MODEL, AGIW_MCP_REVIEWER_MODEL and
+AGIW_MCP_REASONING_EFFORT. Reasoning effort accepts "none", "low", "medium" or
+"high"; the default is unset (None), so no reasoning_effort field is added to
+Nisi's chat requests.
 The Jev endpoint is not configurable outside test mode.
 """
 from __future__ import annotations
@@ -35,7 +39,7 @@ _ITEM_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _JEV_MODEL = re.compile(r"jev-(?:latest|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\Z")
 _KEYS = frozenset({"model_base_url", "author_model", "reviewer_model", "keychain_service",
                    "keychain_account", "jev_model", "max_output_tokens", "reasoning_effort"})
-_ENV = {"model_base_url": "AGIW_MCP_MODEL_BASE_URL", "author_model": "AGIW_MCP_AUTHOR_MODEL",
+_ENV = {"model_base_url": "AGIW_MCP_BASE_URL", "author_model": "AGIW_MCP_AUTHOR_MODEL",
         "reviewer_model": "AGIW_MCP_REVIEWER_MODEL", "reasoning_effort": "AGIW_MCP_REASONING_EFFORT"}
 REASONING_EFFORTS = ("none", "low", "medium", "high")
 
@@ -192,9 +196,11 @@ def load_config() -> Config:
     source = "file" if values else "defaults"
     for key, env_name in _ENV.items():
         env_value = os.environ.get(env_name)
+        if key == "model_base_url" and not env_value:
+            env_value = os.environ.get("AGIW_MCP_MODEL_BASE_URL")
         if env_value:
             values[key] = env_value
-            source = "file+env" if source == "file" else "env"
+            source = "file+env" if source in ("file", "file+env") else "env"
     try:
         checked = _validate(values)
     except ValueError as exc:

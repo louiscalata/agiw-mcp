@@ -231,6 +231,7 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertEqual(os.listdir(temp_parent), [])
         self.assertEqual(os.getcwd(), str(project))
 
+    @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_failed_probe_refuses_and_is_not_cached(self):
         marker = self.tmp / "started"
         fake = write_fake_node(self.tmp / "badbin", "import sys, pathlib\n"
@@ -253,6 +254,20 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertFalse(marker.exists(), "Node was started without a sandbox")
         self.assertEqual(os.listdir(parent), [])
 
+    @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
+    def test_child_env_is_exactly_the_documented_set(self):
+        # Grok's delta review: nothing pinned the runner environment, so a key could have leaked into it.
+        for name in ("TYPESAFE_API_KEY", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "SYSTEMROOT", "WINDIR"):
+            os.environ[name] = "secret-value-123"
+        env = nisi._child_env("/opt/node/bin/node", "/tmp/work")
+        expected = {"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "NODE_NO_WARNINGS"}
+        if os.name == "nt":
+            expected |= {"SYSTEMROOT", "WINDIR"}
+        self.assertEqual(set(env), expected)
+        self.assertNotIn("secret-value-123", {value for key, value in env.items() if key not in ("SYSTEMROOT", "WINDIR")})
+        self.assertEqual((env["HOME"], env["TMPDIR"], env["TMP"], env["TEMP"]), ("/tmp/work",) * 4)
+        self.assertEqual((env["LANG"], env["NODE_NO_WARNINGS"]), ("C.UTF-8", "1"))
+
     def test_probes_get_no_keys_or_proxies(self):
         seen = self.tmp / "probe-env.json"
         fake = write_fake_node(self.tmp / "envbin", "import json, os, pathlib, sys\n"
@@ -274,6 +289,7 @@ class NisiEndToEndTests(IsolatedTestCase):
             self.assertEqual(nisi.find_node(), (str(fake), (22, 13, 0)))
         check()
 
+    @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_comma_in_temp_path_is_refused(self):
         fake = write_fake_node(self.tmp / "bin", FakeRunnerTests.RUNNER % "ok")
         self.write_config(author_model="author-model", reviewer_model="reviewer-model")
@@ -288,6 +304,7 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertEqual(ctx.exception.code, "TEMP_DIR_UNSAFE")
         self.assertEqual(os.listdir(parent), [])
 
+    @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_permission_flag_detection(self):
         # Node 22.13+ prints both names on one line; Node 24 prints only --permission; early Node 22 only the
         # experimental name. Picking the experimental name on 22.13+ breaks the checker child.
