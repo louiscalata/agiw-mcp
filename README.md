@@ -30,7 +30,7 @@ pipx install git+https://github.com/louiscalata/agiw-mcp
 **2. Point it at your local model server.** You need an OpenAI-compatible server on
 your own machine (for example LM Studio) and two different models: an author and a
 reviewer. Save this as `config.json` in `~/Library/Application Support/agiw-mcp/`
-(macOS) or `~/.config/agiw-mcp/` (Linux):
+(macOS), `%APPDATA%\agiw-mcp` (Windows) or `~/.config/agiw-mcp/` (Linux):
 
 ```json
 {
@@ -127,7 +127,7 @@ The model settings can come from the environment instead:
 
 | Config key | Environment variable | Precedence and validation |
 |---|---|---|
-| `model_base_url` | `AGIW_MCP_BASE_URL` | `AGIW_MCP_BASE_URL`, then legacy `AGIW_MCP_MODEL_BASE_URL`, then the config file, then `http://127.0.0.1:1234/v1`. Only HTTP loopback literals (`127.0.0.1` or `[::1]`) are accepted; for a server on port 1235, use `http://127.0.0.1:1235/v1`. |
+| `model_base_url` | `AGIW_MCP_BASE_URL` | `AGIW_MCP_BASE_URL`, then legacy `AGIW_MCP_MODEL_BASE_URL`, then the config file, then `http://127.0.0.1:1234/v1`. Only HTTP loopback literals (`127.0.0.1` or `[::1]`) are accepted. A non-default port belongs in that URL. |
 | `reviewer_base_url` | `AGIW_MCP_REVIEWER_BASE_URL` | Optional. `AGIW_MCP_REVIEWER_BASE_URL`, then the config file, then unset, which means the reviewer uses `model_base_url`. Set it to send the reviewer's requests to a different local server, for example `http://127.0.0.1:1245/v1`. Same loopback-only rule as `model_base_url`. |
 
 Check your setup at any time:
@@ -172,12 +172,11 @@ agiw-mcp consent grant     # interactive; type I agree and press Return
 agiw-mcp consent revoke
 ```
 
-The confirmation is case-insensitive. In order, the prompt trims outer
-whitespace, strips leading and trailing straight single or double quote
-characters, removes all trailing periods, trims outer whitespace again, and
-compares the result case-insensitively with `i agree`. For example, `I AGREE`,
-`'I agree'`, `I agree...` and `"I agree."` are accepted; `"I agree".` is not,
-because quote stripping happens before period removal. Extra words or a
+In order, the prompt trims outer whitespace, strips leading and trailing
+straight single or double quotes, removes all trailing periods, trims outer
+whitespace again, and compares the result case-insensitively with `i agree`.
+`I AGREE`, `'I agree'`, `I agree...` and `"I agree."` are accepted; `"I agree".`
+is not, because quote stripping happens before period removal. Extra words or a
 different space between the two words are not accepted. Non-interactive input
 is refused, and an unrecognized confirmation records nothing.
 
@@ -241,27 +240,26 @@ relative paths), `new_files` (paths the author may create), `acceptance_criteria
 `assertions` (`{path, contains}` or `{path, not_contains}`), `repair_budget` (0 to 3,
 default 1), `timeout_seconds` (30 to 1800, default 600) and an optional `ticket`.
 
-A `ticket` is `{ticketId, claimState, writeScope, owner}`. Only `claimState` `Granted` or
-`Active` is admitted; `writeScope` is a list of scope keys or `/`-separated paths. Before
-Node is started or a temporary folder is created, the ticket is admitted all-or-nothing: it
-is refused (`TICKET_SCOPE_CONFLICT`) if any scope equals, contains or is contained in a scope
-of a ticket already admitted, by this or another agiw-mcp process. Scopes are compared
-ignoring case and Unicode normalization (`README.md` and `readme.MD` are the same scope).
-Scope parts that Windows would alias are refused (`TICKET_INVALID`) rather than normalized:
-parts ending in `.` or a space (`calc.py.`), parts containing `:`, and device names such as
-`CON`, `NUL`, `COM1` or `LPT1` with any extension. The ticket is released when the run ends.
-Admission state lives in `tickets/` under the config directory, or in `AGIW_MCP_TICKET_DIR`
-(an absolute path). On macOS and Linux that directory must not be a symlink and must be owned
-by you with mode `0700` (a looser mode is tightened if possible), and every directory above
-it, including through symlinks, must be owned by you or root and not writable by group or
-others unless sticky (like `/tmp`); otherwise admission is refused (`TICKET_REGISTRY_UNSAFE`).
-A run's locks are released only from the directory they were created in. Locks left by a
-crashed process are not cleaned up automatically; they refuse later admissions until removed.
-On Windows, ticket admission is disabled for now: any ticket is refused
-(`TICKET_UNSUPPORTED_PLATFORM`) before the state directory is touched, until agiw-mcp can
-check the directory for reparse points, ownership and permissions. Runs without a ticket
-still work on Windows unless `require_ticket` is `true`.
-Refusals name only the ticket id.
+A `ticket` is `{ticketId, claimState, writeScope, owner}`. Only `Granted` or `Active` is
+admitted. `writeScope` is a list of scope keys or `/`-separated paths. The ticket is admitted
+all-or-nothing before Node starts or a temporary folder is created, and released when the run
+ends. It is refused (`TICKET_SCOPE_CONFLICT`) when any scope equals, contains, or is contained
+in a scope already admitted by this or another agiw-mcp process. Comparison ignores case and
+Unicode normalization (`README.md` and `readme.MD` match). Parts Windows would alias are
+refused (`TICKET_INVALID`) instead of being normalized: a trailing `.` or space (`calc.py.`),
+a `:`, or a device name such as `CON`, `NUL`, `COM1` or `LPT1` with any extension. Refusals
+name only the ticket id.
+
+State lives in `tickets/` under the config directory, or in `AGIW_MCP_TICKET_DIR` (an absolute
+path). On macOS and Linux that directory must be a real directory owned by you with mode `0700`
+(a looser mode is tightened if possible). Every directory above it, including through
+symlinks, must be owned by you or root and not group- or other-writable unless sticky (like `/tmp`).
+Otherwise admission is refused (`TICKET_REGISTRY_UNSAFE`). Locks are released only from the
+directory that created them. Locks left by a crash are not removed; they keep refusing
+overlapping admissions until deleted. On Windows any ticket is refused
+(`TICKET_UNSUPPORTED_PLATFORM`) before the state directory is touched, until reparse points,
+ownership and permissions can be checked. Runs without a ticket still work on Windows unless
+`require_ticket` is `true`.
 
 Its static checks parse Python (`ast.parse`), JavaScript (`node --check`) and JSON;
 other file types get structural checks only, and the result says which files were

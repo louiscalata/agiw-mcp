@@ -2,19 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration, the per-OS config directory and private file writes.
 
-The config file is optional and closed: unknown keys are refused. Four values
-can also come from the environment so an MCP client entry can carry them:
-AGIW_MCP_BASE_URL (the legacy name AGIW_MCP_MODEL_BASE_URL is used only when
-AGIW_MCP_BASE_URL is unset), AGIW_MCP_AUTHOR_MODEL, AGIW_MCP_REVIEWER_MODEL and
-AGIW_MCP_REASONING_EFFORT and AGIW_MCP_REVIEWER_BASE_URL. reviewer_base_url
-(optional, loopback only like model_base_url) sends the reviewer's chat requests
-to a different local server; when unset the reviewer uses model_base_url.
-Reasoning effort accepts "none", "low", "medium" or
-"high"; the default is unset (None), so no reasoning_effort field is added to
-Nisi's chat requests.
-require_ticket (default false) makes agiw_nisi_run refuse any request without an
-admissible claim ticket; a ticket passed in the arguments is enforced either way.
-The Jev endpoint is not configurable outside test mode.
+The config file is optional. Unknown keys are refused. These environment
+variables override the file when set: AGIW_MCP_BASE_URL (legacy
+AGIW_MCP_MODEL_BASE_URL only when AGIW_MCP_BASE_URL is unset),
+AGIW_MCP_AUTHOR_MODEL, AGIW_MCP_REVIEWER_MODEL, AGIW_MCP_REASONING_EFFORT and
+AGIW_MCP_REVIEWER_BASE_URL. reviewer_base_url is an optional loopback URL for
+the reviewer's chat requests; unset means the reviewer uses model_base_url.
+reasoning_effort is "none", "low", "medium" or "high"; unset sends no
+reasoning_effort field. require_ticket (default false) makes agiw_nisi_run
+refuse a request without an admissible claim ticket; a ticket in the arguments
+is enforced either way. The Jev endpoint is not configurable outside test mode.
 """
 from __future__ import annotations
 
