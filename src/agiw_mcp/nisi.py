@@ -7,6 +7,8 @@ user's project. Each run gets a private temporary directory (mode 0700) that
 receives a hash-verified copy of Nisi and the runner, and is removed afterwards.
 Node runs there with its permission model limiting file access to that
 directory where the installed Node supports it.
+An optional claim ticket (required when config require_ticket is true) is
+validated and admitted before any of this starts and released afterwards.
 """
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ import sys
 import tempfile
 import threading
 
+from . import tickets
 from .config import Config
 from .errors import ToolError
 
@@ -399,12 +402,32 @@ def _parse_output(raw: bytes, request: dict) -> dict:
 
 
 def run(args: dict, config: Config, *, temp_parent: str | None = None) -> dict:
-    request = validate_request(args)
+    """Validate, admit the claim ticket (if any or if required), run, and release the ticket.
+
+    Admission happens before Node is probed or the temporary directory is created, so a refused
+    ticket has no side effects."""
+    has_ticket = isinstance(args, dict) and "ticket" in args
+    if not has_ticket and config.require_ticket:
+        raise ToolError("TICKET_REQUIRED", "require_ticket is set, so agiw_nisi_run needs an admissible claim "
+                        "ticket ({ticketId, claimState, writeScope, owner}).")
+    ticket = tickets.validate(args["ticket"]) if has_ticket else None
+    request = validate_request({k: v for k, v in args.items() if k != "ticket"} if has_ticket else args)
     if not config.author_model or not config.reviewer_model:
         raise ToolError("MODELS_NOT_CONFIGURED", "Configure author_model and reviewer_model first; "
                         "agiw_readiness shows the exact fix.")
     if config.author_model == config.reviewer_model:
         raise ToolError("MODELS_NOT_DISTINCT", "author_model and reviewer_model must be different models.")
+    if ticket is None:
+        return _run_validated(request, config, temp_parent)
+    registry = tickets.registry()
+    admission = registry.admit(args["ticket"])
+    try:
+        return _run_validated(request, config, temp_parent)
+    finally:
+        registry.release(admission["ticketId"])
+
+
+def _run_validated(request: dict, config: Config, temp_parent: str | None) -> dict:
     node, version = find_node()
     if not node or not version or version < MIN_NODE:
         raise ToolError("NODE_UNAVAILABLE", "Node.js 22 or newer must be on the PATH of the MCP client.")
