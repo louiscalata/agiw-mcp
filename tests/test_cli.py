@@ -44,7 +44,8 @@ class CliTests(IsolatedTestCase):
         self.grant_consent()
         shown = self.invoke("consent", "show")
         self.assertEqual(shown.returncode, 0, shown.stderr)
-        self.assertIn(consent.disclosure_text(), shown.stdout.decode())
+        # Windows text-mode stdout writes CRLF; the disclosure itself is LF.
+        self.assertIn(consent.disclosure_text(), shown.stdout.decode().replace("\r\n", "\n"))
         self.assertIn("Consent recorded: yes", shown.stdout.decode())
         revoked = self.invoke("consent", "revoke")
         self.assertEqual(revoked.returncode, 0, revoked.stderr)

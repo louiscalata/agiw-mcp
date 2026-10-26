@@ -347,9 +347,15 @@ class ConfigTests(IsolatedTestCase):
         with mock.patch.object(config.sys, "platform", "darwin"):
             self.assertEqual(config.config_dir(),
                              config.Path.home() / "Library" / "Application Support" / "agiw-mcp")
-        with mock.patch.object(config.sys, "platform", "linux"), mock.patch.object(config.os, "name", "posix"):
-            os.environ["XDG_CONFIG_HOME"] = str(self.tmp / "xdg")
-            self.assertEqual(config.config_dir(), self.tmp / "xdg" / "agiw-mcp")
+        if os.name == "nt":
+            # Path follows the real os.name; pretending this host is POSIX cannot build a path.
+            with mock.patch.object(config.sys, "platform", "win32"):
+                os.environ["APPDATA"] = str(self.tmp / "Roaming")
+                self.assertEqual(config.config_dir(), self.tmp / "Roaming" / "agiw-mcp")
+        else:
+            with mock.patch.object(config.sys, "platform", "linux"), mock.patch.object(config.os, "name", "posix"):
+                os.environ["XDG_CONFIG_HOME"] = str(self.tmp / "xdg")
+                self.assertEqual(config.config_dir(), self.tmp / "xdg" / "agiw-mcp")
 
 
 class NetworkGuardTests(IsolatedTestCase):

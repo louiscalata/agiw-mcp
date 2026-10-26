@@ -70,8 +70,13 @@ globalThis.fetch = async (url, init) => {
             # Load an in-memory fetch fake before the real runner. No socket is opened, and Nisi's
             # actual adapter, stream limits, engine and Node sandbox all still run.
             work = Path(kwargs["cwd"])
-            done = bounded_run([argv[0], *argv[1:-1], "--import=" + str(work / "fake-fetch.mjs"), argv[-1]], **kwargs)
-            self.calls = json.loads((work / "calls.json").read_text())
+            # A backslash in --import is an escape on Windows, so Node never loads the hook.
+            module = (work / "fake-fetch.mjs").resolve().as_uri()
+            done = bounded_run([argv[0], *argv[1:-1], "--import=" + module, argv[-1]], **kwargs)
+            calls_path = work / "calls.json"
+            if not calls_path.is_file():
+                raise AssertionError("the Node import hook did not run")
+            self.calls = json.loads(calls_path.read_text())
             self.bodies = json.loads((work / "bodies.json").read_text())
             return done
 
