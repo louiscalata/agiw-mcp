@@ -273,6 +273,18 @@ class ConfigTests(IsolatedTestCase):
         self.assertEqual(cfg.reviewer_base_url, "http://[::1]:4567/v1")
         self.assertEqual(cfg.source, "file+env")
 
+    def test_reviewer_base_url_null_and_empty_env_fall_back(self):
+        self.write_config(model_base_url="http://127.0.0.1:1235/v1", reviewer_base_url=None)
+        with mock.patch.dict(os.environ, {"AGIW_MCP_REVIEWER_BASE_URL": ""}):
+            cfg = load_config()
+        self.assertIsNone(cfg.reviewer_base_url)
+        self.assertEqual(cfg.reviewer_chat_endpoint, "http://127.0.0.1:1235/v1/chat/completions")
+
+    def test_inherited_reviewer_base_url_is_cleared_by_test_isolation(self):
+        from support import CLEARED_ENV
+        self.assertIn("AGIW_MCP_REVIEWER_BASE_URL", CLEARED_ENV)
+        self.assertNotIn("AGIW_MCP_REVIEWER_BASE_URL", os.environ)
+
     def test_reviewer_base_url_keeps_loopback_validation(self):
         for value in ("http://192.0.2.10:1245/v1", "https://127.0.0.1/v1", "http://localhost:1245/v1",
                       "http://user:pw@127.0.0.1/v1", "http://127.0.0.1/v1?x=1", "http://127.0.0.1:65536/v1", 5):
