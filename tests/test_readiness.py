@@ -45,6 +45,25 @@ class ReadinessTests(IsolatedTestCase):
         self.assertEqual([row["id"] for row in result["checks"]],
                          ["python", "config", "node", "nisi", "models", "consent", "jev_key"])
 
+    def test_separate_reviewer_server_is_probed_for_the_reviewer(self):
+        reviewer_server = FakeModelServer(models=("reviewer-model",))
+        self.addCleanup(reviewer_server.close)
+        self.models.models = ["author-model"]
+        self.write_config(model_base_url=self.models.base + "/v1", reviewer_base_url=reviewer_server.base + "/v1",
+                          author_model="author-model", reviewer_model="reviewer-model")
+        row = readiness.check_models(readiness.load_config())
+        self.assertTrue(row["ok"], row)
+        self.assertIn(reviewer_server.base, row["detail"])
+        reviewer_server.models = ["other-model"]
+        row = readiness.check_models(readiness.load_config())
+        self.assertFalse(row["ok"])
+        self.assertIn("reviewer_model", row["detail"])
+        self.assertIn("reviewer_base_url", row["fix"])
+        reviewer_server.close()
+        row = readiness.check_models(readiness.load_config())
+        self.assertFalse(row["ok"])
+        self.assertIn("reviewer_base_url", row["fix"])
+
     def test_key_is_never_looked_up_before_consent(self):
         # On Linux the Secret Service lookup returns the secret, so nothing may probe it before consent.
         self.configure()

@@ -77,35 +77,59 @@ def check_models(config: Config) -> dict:
     if author == reviewer:
         return _check("models", False, "author_model and reviewer_model are the same model",
                       "Choose a different reviewer_model so the review is independent of the author.")
+    if config.effective_reviewer_base_url == config.model_base_url:
+        listed, failed = _list_models(config.models_endpoint, "model_base_url")
+        if failed:
+            return failed
+        if author not in listed and reviewer not in listed:
+            return _check("models", False,
+                          f"{config.models_endpoint} lists neither author_model {author!r} nor reviewer_model "
+                          f"{reviewer!r}; a different server may be on that port.",
+                          "Set model_base_url in config.json or AGIW_MCP_BASE_URL in the MCP client's environment "
+                          "to your model server's base URL (for example http://127.0.0.1:1235/v1), "
+                          "then load the configured models there or choose model IDs it lists.")
+        for role, model in (("author_model", author), ("reviewer_model", reviewer)):
+            if model not in listed:
+                return _check("models", False, f"{role} {model!r} is not listed by {config.models_endpoint}",
+                              f"Download or load {model!r} in your model server, or change {role} to a listed "
+                              "model ID.")
+        return _check("models", True, f"{config.models_endpoint} lists author {author!r} and reviewer {reviewer!r} "
+                      "(JSON-schema output is not tested here)")
+    # A separate reviewer server: each model must be listed by its own server.
+    for role, model, endpoint, url_key in (
+            ("author_model", author, config.models_endpoint, "model_base_url"),
+            ("reviewer_model", reviewer, config.reviewer_models_endpoint, "reviewer_base_url")):
+        listed, failed = _list_models(endpoint, url_key)
+        if failed:
+            return failed
+        if model not in listed:
+            return _check("models", False, f"{role} {model!r} is not listed by {endpoint}",
+                          f"Load {model!r} on the server at {url_key}, change {role} to a model ID it lists, "
+                          f"or point {url_key} at the server that has it.")
+    return _check("models", True, f"{config.models_endpoint} lists author {author!r} and "
+                  f"{config.reviewer_models_endpoint} lists reviewer {reviewer!r} "
+                  "(JSON-schema output is not tested here)")
+
+
+def _list_models(endpoint: str, url_key: str):
+    """Return (listed model IDs, None) or (None, failed check) for one /models endpoint."""
     try:
-        _, body = request_json(config.models_endpoint, timeout=PROBE_TIMEOUT, max_bytes=1024 * 1024)
+        _, body = request_json(endpoint, timeout=PROBE_TIMEOUT, max_bytes=1024 * 1024)
     except NetworkRefused:
-        return _check("models", False, "The model endpoint URL was refused by policy",
-                      "Use a loopback model_base_url such as http://127.0.0.1:1234/v1.")
+        return None, _check("models", False, "The model endpoint URL was refused by policy",
+                            f"Use a loopback {url_key} such as http://127.0.0.1:1234/v1.")
     except HttpFailure as failure:
-        detail = {"http": f"{config.models_endpoint} returned HTTP {failure.status}",
-                  "invalid_json": f"{config.models_endpoint} did not return JSON",
-                  "too_large": f"{config.models_endpoint} returned more than 1 MB",
-                  "redirect": f"{config.models_endpoint} redirected"}.get(
-            failure.kind, f"{config.models_endpoint} was not reachable within {PROBE_TIMEOUT:g} s")
-        return _check("models", False, detail,
-                      "Start your local OpenAI-compatible server (for example LM Studio's server on port 1234) "
-                      "or set model_base_url to the address it listens on.")
+        detail = {"http": f"{endpoint} returned HTTP {failure.status}",
+                  "invalid_json": f"{endpoint} did not return JSON",
+                  "too_large": f"{endpoint} returned more than 1 MB",
+                  "redirect": f"{endpoint} redirected"}.get(
+            failure.kind, f"{endpoint} was not reachable within {PROBE_TIMEOUT:g} s")
+        return None, _check("models", False, detail,
+                            "Start your local OpenAI-compatible server (for example LM Studio's server on port "
+                            f"1234) or set {url_key} to the address it listens on.")
     data = body.get("data") if isinstance(body, dict) else None
     listed = {item.get("id") for item in data if isinstance(item, dict)} if isinstance(data, list) else set()
-    if author not in listed and reviewer not in listed:
-        return _check("models", False,
-                      f"{config.models_endpoint} lists neither author_model {author!r} nor reviewer_model "
-                      f"{reviewer!r}; a different server may be on that port.",
-                      "Set model_base_url in config.json or AGIW_MCP_BASE_URL in the MCP client's environment "
-                      "to your model server's base URL (for example http://127.0.0.1:1235/v1), "
-                      "then load the configured models there or choose model IDs it lists.")
-    for role, model in (("author_model", author), ("reviewer_model", reviewer)):
-        if model not in listed:
-            return _check("models", False, f"{role} {model!r} is not listed by {config.models_endpoint}",
-                          f"Download or load {model!r} in your model server, or change {role} to a listed model ID.")
-    return _check("models", True, f"{config.models_endpoint} lists author {author!r} and reviewer {reviewer!r} "
-                  "(JSON-schema output is not tested here)")
+    return listed, None
 
 
 def check_key(config: Config) -> dict:
