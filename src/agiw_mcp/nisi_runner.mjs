@@ -17,6 +17,8 @@ import { createLocalChatAuthorAdapter, createLocalChatReviewerAdapter } from './
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MESSAGE_LIMIT = 400;
+// Nisi rejects a test finding longer than 2048 characters (TESTS_FINDING_INVALID) and then blocks repair.
+const FINDING_LIMIT = 2048;
 const WORK_DIR = fileURLToPath(new URL('.', import.meta.url));
 // The checker child gets this process's sandbox explicitly: Node versions differ in what they pass on.
 const CHILD_SANDBOX = process.execArgv.filter(arg => /^--(?:experimental-permission|permission|allow-fs-read=|allow-fs-write=)/u.test(arg));
@@ -35,6 +37,7 @@ const PYTHON_CHECK = [
 
 const fail = code => { const error = new Error(code); error.code = code; throw error; };
 const clip = text => (text.length > MESSAGE_LIMIT ? `${text.slice(0, MESSAGE_LIMIT)}...` : text);
+const boundFinding = text => (text.length > FINDING_LIMIT ? `${text.slice(0, FINDING_LIMIT - 3)}...` : text);
 
 async function readRequest() {
   const chunks = [];
@@ -101,13 +104,21 @@ function syntaxCheck(path, content, request) {
 // Adds reasoning_effort when configured and refuses reasoning-only answers without promoting hidden
 // reasoning to content. Inspect the same capped stream Nisi reads; do not clone or eagerly buffer it.
 // Nisi's receipts hash the body it built; the run result reports the added field separately.
+// LM Studio reads the top-level field. llama-server ignores that and reads chat_template_kwargs.
 function withReasoningEffort(effort, onReasoningOnly) {
   const configured = effort !== null && effort !== undefined;
   if (configured && !['none', 'low', 'medium', 'high'].includes(effort)) fail('REQUEST_INVALID');
   return async (url, init) => {
     if (configured) {
       const body = JSON.parse(init.body);
-      init = { ...init, body: JSON.stringify({ ...body, reasoning_effort: effort }) };
+      const template = body.chat_template_kwargs;
+      const chatTemplateKwargs = template !== null && typeof template === 'object' && !Array.isArray(template)
+        ? template : {};
+      init = { ...init, body: JSON.stringify({
+        ...body,
+        reasoning_effort: effort,
+        chat_template_kwargs: { ...chatTemplateKwargs, reasoning_effort: effort },
+      }) };
     }
     const response = await globalThis.fetch(url, init);
     if (!response.ok || !response.body?.getReader) return response;
@@ -204,7 +215,10 @@ async function main() {
       const proposed = new Map(candidate.files.map(file => [file.path, file.content]));
       const failures = [];
       let executed = 0;
-      const assert = (ok, code, message) => { executed += 1; if (!ok) failures.push({ code, message }); };
+      const assert = (ok, code, message) => {
+        executed += 1;
+        if (!ok) failures.push({ code, message: boundFinding(message) });
+      };
       assert(candidate.files.some(file => original.get(file.path) !== file.content), 'NO_CHANGE',
         'The candidate does not change any file.');
       const empty = candidate.files.filter(file => file.content.trim() === '').map(file => file.path);

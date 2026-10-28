@@ -226,8 +226,14 @@ def node_available() -> bool:
 
 
 def write_fake_node(directory: Path, body: str) -> Path:
-    """Write an executable Python script that stands in for node."""
+    """Write an executable stand-in for node. On Windows, a .cmd that runs this Python."""
     directory.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        script = directory / "node_fake.py"
+        script.write_text(body, encoding="utf-8")
+        launcher = directory / "node.cmd"
+        launcher.write_text(f'@echo off\r\n@"{sys.executable}" "{script}" %*\r\n', encoding="utf-8")
+        return launcher
     path = directory / "node"
     path.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
     path.chmod(0o755)

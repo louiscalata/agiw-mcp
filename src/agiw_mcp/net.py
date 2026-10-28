@@ -8,8 +8,11 @@ is not a loopback literal is refused before a socket opens.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import threading
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -17,6 +20,8 @@ from urllib.parse import urlsplit
 from .config import test_mode
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+# Body reads use this idle timeout so a trickling server cannot reset the deadline on every byte.
+_POLL_SECONDS = 0.25
 
 
 class NetworkRefused(Exception):
@@ -51,18 +56,88 @@ def guard(url: str) -> None:
         raise NetworkRefused("test mode refuses non-loopback URLs")
 
 
-def _opener():
+class _SocketBox:
+    """Sockets for the in-flight exchange, so a deadline can close them from the caller."""
+
+    def __init__(self) -> None:
+        self._socks: list = []
+        self._lock = threading.Lock()
+
+    def remember(self, sock) -> None:
+        if sock is None:
+            return
+        with self._lock:
+            if sock not in self._socks:
+                self._socks.append(sock)
+
+    def arm_poll(self, seconds: float) -> None:
+        with self._lock:
+            socks = list(self._socks)
+        for sock in socks:
+            try:
+                sock.settimeout(seconds)
+            except OSError:
+                pass
+
+    def close(self) -> None:
+        with self._lock:
+            socks = list(self._socks)
+        for sock in socks:
+            shutdown = getattr(sock, "shutdown", None)
+            if shutdown is not None:
+                try:
+                    shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+def _connection_class(capture: _SocketBox, base):
+    class Connection(base):
+        def connect(self) -> None:
+            super().connect()
+            capture.remember(self.sock)
+
+    return Connection
+
+
+class _CapturingHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, capture: _SocketBox):
+        super().__init__()
+        self._capture = capture
+
+    def http_open(self, req):
+        return self.do_open(_connection_class(self._capture, http.client.HTTPConnection), req)
+
+
+class _CapturingHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, capture: _SocketBox):
+        super().__init__()
+        self._capture = capture
+
+    def https_open(self, req):
+        return self.do_open(_connection_class(self._capture, http.client.HTTPSConnection), req)
+
+
+def _opener(capture: _SocketBox | None = None):
     # Never use HTTP(S)_PROXY or system proxies: loopback traffic stays local, and the Jev request goes
     # straight to the endpoint named in the consent disclosure.
-    return urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}))
+    handlers = [_NoRedirect(), urllib.request.ProxyHandler({})]
+    if capture is not None:
+        handlers.extend((_CapturingHTTPHandler(capture), _CapturingHTTPSHandler(capture)))
+    return urllib.request.build_opener(*handlers)
 
 
 def request_json(url: str, *, method: str = "GET", body: dict | None = None, headers: dict | None = None,
                  timeout: float, max_bytes: int) -> tuple[int, object]:
     """Send one request and parse a JSON response. Never retries.
 
-    ``timeout`` bounds the whole exchange (connect, headers and body), not only each socket read, so a
-    server that trickles bytes cannot hold the caller past it."""
+    ``timeout`` bounds the exchange (connect, headers and body), not each socket read. A worker
+    still reading when it expires has its socket closed and is joined for one short poll, so a
+    trickling server cannot keep the thread."""
     guard(url)
     data = None
     all_headers = {"Accept": "application/json"}
@@ -72,11 +147,33 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     all_headers.update(headers or {})
     req = urllib.request.Request(url, data=data, method=method, headers=all_headers)
     outcome: dict = {}
+    capture = _SocketBox()
+    expired = threading.Event()
+    deadline = time.monotonic() + timeout
 
     def exchange() -> None:
         try:
-            with _opener().open(req, timeout=timeout) as resp:
-                outcome["raw"] = resp.read(max_bytes + 1)
+            with _opener(capture).open(req, timeout=timeout) as resp:
+                # After the headers, poll the socket. A short idle timeout wakes a read that shutdown
+                # does not (macOS), so the loop can see the deadline between chunks.
+                capture.arm_poll(_POLL_SECONDS)
+                chunks: list[bytes] = []
+                size = 0
+                reader = getattr(resp, "read1", None) or resp.read
+                while size <= max_bytes and not expired.is_set() and time.monotonic() < deadline:
+                    try:
+                        chunk = reader(max_bytes + 1 - size)
+                    except (TimeoutError, socket.timeout):
+                        continue
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    size += len(chunk)
+                if expired.is_set() or time.monotonic() >= deadline:
+                    # Closing the socket can end the read with a short body. Do not parse it.
+                    outcome["error"] = HttpFailure("unreachable")
+                    return
+                outcome["raw"] = b"".join(chunks)
                 outcome["status"] = resp.status
         except BaseException as exc:  # noqa: B036 - handed to the caller's thread below
             outcome["error"] = exc
@@ -85,8 +182,9 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     worker.start()
     worker.join(timeout)
     if worker.is_alive():
-        # Abandoned: a worker still blocked on a trickling server ends when that server stops or closes,
-        # and nothing it reads is used.
+        expired.set()
+        capture.close()
+        worker.join(_POLL_SECONDS + 0.5)
         raise HttpFailure("unreachable")
     try:
         if "error" in outcome:
@@ -101,7 +199,7 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
         except Exception:
             pass
         raise HttpFailure("http", status) from None
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
         raise HttpFailure("unreachable") from None
     if len(raw) > max_bytes:
         raise HttpFailure("too_large", status)

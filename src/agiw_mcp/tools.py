@@ -96,9 +96,11 @@ TOOLS = [
             "task": {"type": "string", "maxLength": nisi.MAX_TASK_CHARS,
                      "description": "What to change, in plain language."},
             "files": {"type": "array", "maxItems": nisi.MAX_FILES, "items": _FILE,
-                      "description": "Current contents of the files the models may change (relative paths)."},
+                      "description": "Current contents of the files the models may change (relative paths). "
+                                     f"files and new_files together may name at most {nisi.MAX_FILES} paths."},
             "new_files": {"type": "array", "maxItems": nisi.MAX_FILES, "items": {"type": "string"},
-                          "description": "Relative paths the author may create."},
+                          "description": "Relative paths the author may create. "
+                                         f"Counted with files toward the {nisi.MAX_FILES}-path limit."},
             "acceptance_criteria": {"type": "array", "maxItems": nisi.MAX_CRITERIA,
                                     "items": {"type": "string", "maxLength": nisi.MAX_CRITERION_CHARS}},
             "assertions": {"type": "array", "maxItems": nisi.MAX_ASSERTIONS, "items": _ASSERTION},

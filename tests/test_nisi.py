@@ -26,6 +26,9 @@ class NisiInputTests(IsolatedTestCase):
         good = {"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}
         self.assertEqual(nisi.validate_request(good)["allowed"], ["calc.py"])
         self.assertEqual(nisi.validate_request(good)["language"], "python")
+        full = {"task": "x", "files": [{"path": f"f{i}.py", "content": "x"} for i in range(32)],
+                "new_files": [f"n{i}.py" for i in range(32)]}
+        self.assertEqual(len(nisi.validate_request(full)["allowed"]), 64)
         bad_cases = [
             {"task": ""},
             {"task": "x", "files": [{"path": "/etc/passwd", "content": ""}]},
@@ -38,6 +41,8 @@ class NisiInputTests(IsolatedTestCase):
             {"task": "x", "new_files": ["a.py"], "repair_budget": 9},
             {"task": "x", "new_files": ["a.py"], "assertions": [{"path": "b.py", "contains": "y"}]},
             {"task": "x", "new_files": ["a.py"], "unknown": 1},
+            {"task": "x", "files": [{"path": f"f{i}.py", "content": "x"} for i in range(33)],
+             "new_files": [f"n{i}.py" for i in range(32)]},
         ]
         for case in bad_cases:
             with self.assertRaises(ToolError, msg=str(case)[:80]):
@@ -84,6 +89,48 @@ class ProbeEnvTests(IsolatedTestCase):
     def test_posix_is_unchanged(self):
         env = self.probe_env("posix", {**self.WINDOWS, **self.SECRETS, "PATH": "/usr/bin"})
         self.assertEqual(env, {"PATH": "/usr/bin", "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"})
+
+    def test_runner_env_matches_the_probe_on_windows(self):
+        with mock.patch.dict(os.environ, {**self.WINDOWS, **self.SECRETS}, clear=True), \
+                mock.patch.object(nisi.os, "name", "nt"):
+            env = nisi._child_env(r"C:\node\node.exe", r"C:\work")
+        self.assertEqual(set(env), {"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "NODE_NO_WARNINGS",
+                                    "SystemRoot", "SYSTEMDRIVE", "WINDIR"})
+        self.assertEqual(env["SystemRoot"], r"C:\Windows")
+        self.assertEqual(env["SYSTEMDRIVE"], "C:")
+        # dirname follows this process. On POSIX a backslash is not a separator, so the path
+        # spelling is not asserted here; the copied variable names are.
+        self.assertEqual(env["PATH"], os.path.dirname(r"C:\node\node.exe"))
+        self.assertNotIn("secret-value-123", env.values())
+        self.assertEqual((env["HOME"], env["TMPDIR"], env["TMP"], env["TEMP"]), (r"C:\work",) * 4)
+
+    def test_windows_cmd_shim_resolves_to_node_exe(self):
+        folder = self.tmp / "nodebin"
+        folder.mkdir()
+        (folder / "node.cmd").write_text("@echo off\n", encoding="utf-8")
+        exe = folder / "node.exe"
+        exe.write_bytes(b"MZ")
+        with mock.patch.object(nisi.os, "name", "nt"):
+            self.assertEqual(nisi._windows_node_exe(str(folder / "node.cmd")), str(exe))
+            self.assertEqual(nisi._windows_node_exe(str(exe)), str(exe))
+
+    def test_windows_spawn_does_not_set_process_group(self):
+        with mock.patch.object(nisi.os, "name", "nt"), \
+                mock.patch.object(nisi.subprocess, "Popen", side_effect=OSError("boom")) as popen:
+            with self.assertRaises(OSError):
+                nisi._bounded_run(["node"], data=b"", cwd=".", env={}, timeout=1)
+        self.assertNotIn("creationflags", popen.call_args.kwargs)
+        self.assertNotIn("start_new_session", popen.call_args.kwargs)
+
+    def test_windows_permission_paths_use_forward_slashes(self):
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        done = subprocess.CompletedProcess(["node", "--help"], 0, b"  --permission\n", b"")
+        with mock.patch.object(nisi.os, "name", "nt"), mock.patch.object(nisi.subprocess, "run", return_value=done):
+            flags, sandbox = nisi.permission_flags(r"C:\node\node.exe", r"C:\work\dir")
+        self.assertEqual(sandbox, "node-permission")
+        self.assertIn("--allow-fs-read=C:/work/dir", flags)
+        self.assertIn("--allow-fs-write=C:/work/dir", flags)
 
     def test_windows_failed_help_probe_still_refuses(self):
         nisi._FLAG_CACHE.clear()
@@ -196,6 +243,7 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertEqual({op for op, _ in self.models.calls}, {"draft", "review"})
         self.assertTrue(bodies)
         self.assertEqual({body.get("reasoning_effort") for body in bodies}, {"none"})
+        self.assertEqual({body.get("chat_template_kwargs", {}).get("reasoning_effort") for body in bodies}, {"none"})
         self.assertEqual(result["reasoningEffort"], "none")
         self.assertEqual(result["outcome"], "COMPLETED", result)
 
@@ -266,17 +314,17 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertFalse(marker.exists(), "Node was started without a sandbox")
         self.assertEqual(os.listdir(parent), [])
 
-    @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_child_env_is_exactly_the_documented_set(self):
-        # Grok's delta review: nothing pinned the runner environment, so a key could have leaked into it.
+        # Nothing pinned the runner environment, so a key could have leaked into it.
         for name in ("TYPESAFE_API_KEY", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "SYSTEMROOT", "WINDIR"):
             os.environ[name] = "secret-value-123"
         env = nisi._child_env("/opt/node/bin/node", "/tmp/work")
         expected = {"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "NODE_NO_WARNINGS"}
         if os.name == "nt":
-            expected |= {"SYSTEMROOT", "WINDIR"}
+            expected |= set(nisi._windows_process_env())
         self.assertEqual(set(env), expected)
-        self.assertNotIn("secret-value-123", {value for key, value in env.items() if key not in ("SYSTEMROOT", "WINDIR")})
+        kept = set(nisi._PROBE_WINDOWS_NAMES)
+        self.assertNotIn("secret-value-123", {value for key, value in env.items() if key not in kept})
         self.assertEqual((env["HOME"], env["TMPDIR"], env["TMP"], env["TEMP"]), ("/tmp/work",) * 4)
         self.assertEqual((env["LANG"], env["NODE_NO_WARNINGS"]), ("C.UTF-8", "1"))
 
@@ -403,6 +451,17 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertIn("bad.mjs:2", messages)
         self.assertIn("SyntaxError", messages)
         self.assertNotIn("[stdin]", messages)
+
+    def test_empty_file_finding_stays_inside_nisi_limit(self):
+        names = [f"e{index:02d}{'n' * 100}.py" for index in range(30)]
+        self.models.draft = lambda prompt: {"candidate": {"files": [
+            {"path": name, "content": " \n"} for name in names]}, "note": "Blank."}
+        result = self.run_tool({"task": "Add modules.", "new_files": names, "repair_budget": 0})
+        tests_stage = [stage for stage in result["stages"] if stage["stage"] == "tests"][0]
+        failure = [item for item in tests_stage["failures"] if item["code"] == "EMPTY_FILE"][0]
+        self.assertLessEqual(len(failure["message"]), 2048)
+        self.assertTrue(failure["message"].endswith("..."))
+        self.assertNotIn("TESTS_FINDING_INVALID", json.dumps(result))
 
 
 if __name__ == "__main__":

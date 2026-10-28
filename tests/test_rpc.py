@@ -83,6 +83,16 @@ class RpcTests(IsolatedTestCase):
         self.assertEqual(codes, [-32700, -32600, -32601, -32602, -32602, -32600, -32600, -32700, None])
         self.assertEqual(replies[-1], {"jsonrpc": "2.0", "id": 9, "result": {}})
 
+    def test_malformed_frame_without_a_method_is_a_parse_error(self):
+        replies = exchange(
+            frame({"jsonrpc": "2.0", "id": 1}),
+            frame({"jsonrpc": "2.0", "id": 2, "result": {}, "error": {"code": -1, "message": "both"}}),
+            frame({"jsonrpc": "2.0", "result": {}}),
+            frame({"jsonrpc": "2.0", "id": 3, "result": {"ok": True}}),
+            frame({"jsonrpc": "2.0", "id": 4, "method": "ping"}))
+        self.assertEqual([reply.get("error", {}).get("code") for reply in replies[:3]], [-32700, -32700, -32700])
+        self.assertEqual(replies[3], {"jsonrpc": "2.0", "id": 4, "result": {}})
+
     def test_tool_errors_are_results_not_protocol_errors(self):
         reply = exchange(frame({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                                 "params": {"name": "agiw_readiness", "arguments": {"bogus": 1}}}))[0]
