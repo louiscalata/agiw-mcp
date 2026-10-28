@@ -63,8 +63,10 @@ There is no telemetry and no update check.
   directory is removed afterwards, also on failure and timeout. The test suite
   verifies that nothing outside it changes.
 - Node's version and permission probes (`node --version` and `node --help`)
-  run with only the inherited `PATH`, `LANG=C.UTF-8` and `NODE_NO_WARNINGS=1`;
-  keys, proxy settings and other environment variables are not passed to them.
+  run with only the inherited `PATH`, `LANG=C.UTF-8` and `NODE_NO_WARNINGS=1`.
+  On Windows, `SystemRoot`, `SYSTEMDRIVE` and `WINDIR` are also passed through
+  when set (matched case-insensitively): without `SystemRoot`, Node cannot
+  start. Keys, proxy settings and other environment variables are not passed.
   A failed permission probe (exception or nonzero exit) refuses the run with
   `NODE_UNAVAILABLE`; that failed result is not cached.
 - If Node's help lists `--permission` or `--experimental-permission`, the
@@ -79,10 +81,10 @@ There is no telemetry and no update check.
 - The runner uses a minimal environment: `PATH` (the Node directory and,
   on POSIX, `/usr/bin` and `/bin`), `HOME`, `TMPDIR`, `TMP` and `TEMP`
   (all pointing to the temporary directory), `LANG` (`C.UTF-8`) and
-  `NODE_NO_WARNINGS` (`1`). On Windows, `SYSTEMROOT` and `WINDIR` are also
-  set to their parent values when present. The runner also has a
-  wall-clock limit and capped output. The process group is killed on
-  timeout.
+  `NODE_NO_WARNINGS` (`1`). On Windows it receives the same `SystemRoot`,
+  `SYSTEMDRIVE` and `WINDIR` values as the probes. The runner also has a
+  wall-clock limit and capped output. The child is killed on timeout (the
+  process group on POSIX).
 - Generated code is never executed. Static checks only parse it: `node --check`
   for JavaScript, Python's `ast.parse` in an isolated interpreter (`-I -S -B`),
   and `JSON.parse`. These checker processes are started by the runner, which is

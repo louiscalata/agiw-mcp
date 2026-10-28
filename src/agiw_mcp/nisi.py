@@ -5,13 +5,15 @@
 The caller passes file contents, not paths. agiw-mcp never reads or writes the
 user's project. Each run gets a private temporary directory (mode 0700) that
 receives a hash-verified copy of Nisi and the runner, and is removed afterwards.
-Node's version and permission probes receive only PATH, LANG=C.UTF-8 and
-NODE_NO_WARNINGS=1. A failed permission probe refuses the run with
-NODE_UNAVAILABLE. When Node exposes a supported permission flag, the runner
-uses it to limit file access to the temporary directory; otherwise it proceeds
-without permission flags and reports sandbox "none" (no unsupported-model
-refusal is implemented). A comma in the resolved temporary path refuses the
-run with TEMP_DIR_UNSAFE. The runner also uses a minimal environment.
+Node's version and permission probes receive PATH, LANG=C.UTF-8 and
+NODE_NO_WARNINGS=1, plus SystemRoot, SYSTEMDRIVE and WINDIR on Windows when
+set. A failed permission probe refuses the run with NODE_UNAVAILABLE. When
+Node exposes a supported permission flag, the runner uses it to limit file
+access to the temporary directory; otherwise it proceeds without permission
+flags and reports sandbox "none" (no unsupported-model refusal is implemented).
+A comma in the resolved temporary path refuses the run with TEMP_DIR_UNSAFE.
+The runner gets that same minimal environment, with HOME, TMPDIR, TMP and TEMP
+pointing at the temporary directory.
 An optional claim ticket (required when config require_ticket is true) is
 validated and admitted before any of this starts and released afterwards.
 """
@@ -147,28 +149,51 @@ def _write_new(path: Path, data: bytes) -> None:
 _PROBE_WINDOWS_NAMES = ("SystemRoot", "SYSTEMDRIVE", "WINDIR")
 
 
-def _probe_env() -> dict:
-    """Only what `node --version` and `node --help` need: no keys, proxies or other variables.
+def _windows_process_env() -> dict[str, str]:
+    """SystemRoot, SYSTEMDRIVE and WINDIR when set, matched case-insensitively.
 
-    On Windows, SystemRoot, SYSTEMDRIVE and WINDIR are also passed through when set (matched
-    case-insensitively): without SystemRoot, Node 24 aborts with exit 134 initializing its CSPRNG."""
-    env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
-    if os.name == "nt":
-        for canonical in _PROBE_WINDOWS_NAMES:
-            if os.environ.get(canonical):
-                env[canonical] = os.environ[canonical]
-                continue
-            for key, value in os.environ.items():
-                if key.upper() == canonical.upper() and value:
-                    env[canonical] = value
+    Without SystemRoot, CreateProcess cannot start Node and Node 24 aborts with
+    exit 134 while initializing its CSPRNG. Nothing else is copied."""
+    if os.name != "nt":
+        return {}
+    found: dict[str, str] = {}
+    for canonical in _PROBE_WINDOWS_NAMES:
+        value = os.environ.get(canonical) or ""
+        if not value:
+            for key, candidate in os.environ.items():
+                if key.upper() == canonical.upper() and candidate:
+                    value = candidate
                     break
+        if value:
+            found[canonical] = value
+    return found
+
+
+def _probe_env() -> dict:
+    """Only what `node --version` and `node --help` need: no keys, proxies or other variables."""
+    env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
+    env.update(_windows_process_env())
     return env
+
+
+def _windows_node_exe(path: str) -> str:
+    """Use node.exe beside a .cmd or .bat shim. CreateProcess cannot start those shims."""
+    if os.name != "nt":
+        return path
+    root, ext = os.path.splitext(path)
+    if ext.lower() not in {".cmd", ".bat"}:
+        return path
+    exe = root + ".exe"
+    if not os.path.isfile(exe):
+        exe = os.path.join(os.path.dirname(path), "node.exe")
+    return exe if os.path.isfile(exe) else path
 
 
 def find_node() -> tuple[str | None, tuple[int, int, int] | None]:
     path = shutil.which("node")
     if not path:
         return None, None
+    path = _windows_node_exe(path)
     try:
         done = subprocess.run([path, "--version"], stdin=subprocess.DEVNULL, capture_output=True,
                               timeout=3, check=False, env=_probe_env())
@@ -210,7 +235,9 @@ def permission_flags(node: str, workdir: str) -> tuple[list[str], str]:
     base = _FLAG_CACHE[node]
     if base is None:
         return [], "none"
-    return base + [f"--allow-fs-read={workdir}", f"--allow-fs-write={workdir}", "--allow-child-process"], \
+    # Node's Windows permission parser has treated `\` as an escape; `/` names the same path.
+    allow = workdir.replace("\\", "/") if os.name == "nt" else workdir
+    return base + [f"--allow-fs-read={allow}", f"--allow-fs-write={allow}", "--allow-child-process"], \
         "node-permission"
 
 
@@ -271,6 +298,9 @@ def validate_request(args: dict) -> dict:
     if len(set(new_files)) != len(new_files) or set(new_files) & seen:
         raise ToolError("INPUT_INVALID", "new_files must be unique and must not repeat a path from files.")
     allowed = sorted(seen | set(new_files))
+    # Each list is capped above. The cap also applies to the union, or 64 files plus 64 new files would pass.
+    if len(allowed) > MAX_FILES:
+        raise ToolError("INPUT_INVALID", f"files and new_files together may name at most {MAX_FILES} paths.")
     if not allowed:
         raise ToolError("INPUT_INVALID", "Provide at least one file in files or one path in new_files.")
     criteria = args.get("acceptance_criteria", [])
@@ -315,8 +345,9 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 
 def _bounded_run(argv: list[str], *, data: bytes, cwd: str, env: dict, timeout: float) -> tuple[int | None, bytes, str]:
     """Run a child with capped output and a wall-clock limit. Returns (code, stdout, state)."""
-    extra = {"start_new_session": True} if os.name == "posix" else {
-        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    # On Windows, CREATE_NEW_PROCESS_GROUP makes CreateProcess fail (WinError 87) when the parent
+    # has no console, and _kill_tree uses TerminateProcess rather than the group.
+    extra = {"start_new_session": True} if os.name == "posix" else {}
     proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             cwd=cwd, env=env, **extra)
     out = bytearray()
@@ -384,10 +415,7 @@ def _child_env(node: str, workdir: str) -> dict:
     path_dirs = [os.path.dirname(node)] + (["/usr/bin", "/bin"] if os.name == "posix" else [])
     env = {"PATH": os.pathsep.join(path_dirs), "HOME": workdir, "TMPDIR": workdir, "TMP": workdir,
            "TEMP": workdir, "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
-    if os.name == "nt":  # Node cannot start on Windows without these; nothing else needs them
-        for name in ("SYSTEMROOT", "WINDIR"):
-            if os.environ.get(name):
-                env[name] = os.environ[name]
+    env.update(_windows_process_env())
     return env
 
 

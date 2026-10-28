@@ -74,10 +74,13 @@ class NetTests(IsolatedTestCase):
         self.addCleanup(stop.set)
         started = time.monotonic()
         with self.assertRaises(net.HttpFailure) as ctx:
-            net.request_json(f"http://127.0.0.1:{port}/v1/models", timeout=1.0, max_bytes=8192)
+            net.request_json(f"http://127.0.0.1:{port}/v1/models", timeout=0.8, max_bytes=8192)
         elapsed = time.monotonic() - started
         self.assertEqual(ctx.exception.kind, "unreachable")
+        # The body would take minutes. The bound covers the deadline plus one poll, not the trickle.
         self.assertLess(elapsed, 2.0)
+        live = [item for item in threading.enumerate() if item.name == "agiw-mcp-http" and item.is_alive()]
+        self.assertEqual(live, [])
 
 
 if __name__ == "__main__":

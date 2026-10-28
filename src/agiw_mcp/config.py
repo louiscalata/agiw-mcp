@@ -2,16 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration, the per-OS config directory and private file writes.
 
-The config file is optional and closed: unknown keys are refused. Four values
-can also come from the environment so an MCP client entry can carry them:
-AGIW_MCP_BASE_URL (the legacy name AGIW_MCP_MODEL_BASE_URL is used only when
-AGIW_MCP_BASE_URL is unset), AGIW_MCP_AUTHOR_MODEL, AGIW_MCP_REVIEWER_MODEL and
-AGIW_MCP_REASONING_EFFORT and AGIW_MCP_REVIEWER_BASE_URL. reviewer_base_url
-(optional, loopback only like model_base_url) sends the reviewer's chat requests
-to a different local server; when unset the reviewer uses model_base_url.
-Reasoning effort accepts "none", "low", "medium" or
-"high"; the default is unset (None), so no reasoning_effort field is added to
-Nisi's chat requests.
+The config file is optional. Unknown keys are refused. These environment
+variables override the file when set: AGIW_MCP_BASE_URL (legacy
+AGIW_MCP_MODEL_BASE_URL only when AGIW_MCP_BASE_URL is unset),
+AGIW_MCP_AUTHOR_MODEL, AGIW_MCP_REVIEWER_MODEL, AGIW_MCP_REASONING_EFFORT and
+AGIW_MCP_REVIEWER_BASE_URL. reviewer_base_url is an optional loopback URL for
+the reviewer's chat requests; unset means the reviewer uses model_base_url.
+reasoning_effort is "none", "low", "medium" or "high"; unset sends no
+reasoning_effort field.
 require_ticket (default false) makes agiw_nisi_run refuse any request without an
 admissible claim ticket; a ticket passed in the arguments is enforced either way.
 The Jev endpoint is not configurable outside test mode.
@@ -75,15 +73,43 @@ def config_dir() -> Path:
 
 
 def display_path(path) -> str:
-    """Show a path with the home directory replaced by ~."""
+    """Show a path with the home directory replaced by ~.
+
+    On Windows the home prefix matches either separator and ignores case, so
+    ``C:\\Profiles\\Ada\\x`` and ``c:/profiles/ada/x`` both display as ``~/x``.
+    """
     text = str(path)
     try:
         home = str(Path.home())
     except (RuntimeError, KeyError):
         return text
-    if home and home not in ("/", "\\") and (text == home or text.startswith(home + os.sep)):
-        return "~" + text[len(home):]
-    return text
+    if not home or home in ("/", "\\"):
+        return text
+    relative = _relative_to_home(text, home)
+    if relative is None:
+        return text
+    return "~" if not relative else "~/" + relative
+
+
+def _split_display_path(text: str) -> list[str]:
+    parts = text.replace("/", "\\").split("\\") if os.name == "nt" else text.split("/")
+    if len(parts) > 1 and parts[-1] == "":
+        parts = parts[:-1]
+    return parts
+
+
+def _relative_to_home(text: str, home: str) -> str | None:
+    text_parts = _split_display_path(text)
+    home_parts = _split_display_path(home)
+    if not home_parts or len(text_parts) < len(home_parts):
+        return None
+
+    def same(left: str, right: str) -> bool:
+        return left.casefold() == right.casefold() if os.name == "nt" else left == right
+
+    if not all(same(text_parts[index], home_parts[index]) for index in range(len(home_parts))):
+        return None
+    return "/".join(text_parts[len(home_parts):])
 
 
 def validate_loopback_base_url(value, name: str = "model_base_url") -> str:
@@ -113,8 +139,10 @@ class Config:
     keychain_account: str = DEFAULT_ACCOUNT
     jev_model: str = DEFAULT_JEV_MODEL
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
-    # Sent as `reasoning_effort` on Nisi's chat requests. Reasoning models on LM Studio return empty content
-    # under JSON-schema output unless this is "none"; unset sends nothing, as before.
+    # Sent on Nisi's chat requests as top-level reasoning_effort (LM Studio) and
+    # chat_template_kwargs.reasoning_effort (llama-server, which ignores the top-level field).
+    # Reasoning models on LM Studio return empty content under JSON-schema output unless this is "none";
+    # unset sends nothing.
     reasoning_effort: str | None = None
     # When true, agiw_nisi_run refuses requests without an admissible claim ticket (see tickets.py).
     require_ticket: bool = False

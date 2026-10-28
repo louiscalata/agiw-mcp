@@ -327,15 +327,35 @@ class ConfigTests(IsolatedTestCase):
     def test_display_path_hides_home(self):
         home = str(config.Path.home())
         self.assertEqual(config.display_path(home + "/x/y"), "~/x/y")
+        self.assertEqual(config.display_path(home + "X"), home + "X")
         self.assertEqual(config.display_path("/opt/tool"), "/opt/tool")
+
+    def test_display_path_windows_separators_and_drive_letter(self):
+        with mock.patch.object(config.os, "name", "nt"), \
+                mock.patch.object(config.Path, "home", return_value=r"C:\Profiles\Ada"):
+            self.assertEqual(config.display_path(r"C:\Profiles\Ada\x\y"), "~/x/y")
+            self.assertEqual(config.display_path("C:/Profiles/Ada/x/y"), "~/x/y")
+            self.assertEqual(config.display_path(r"c:\profiles\ada\x\y"), "~/x/y")
+            self.assertEqual(config.display_path(r"C:\Profiles\Ada"), "~")
+            self.assertEqual(config.display_path("C:\\Profiles\\Ada\\"), "~")
+            self.assertEqual(config.display_path(r"C:\Profiles\AdaExtra\x"), r"C:\Profiles\AdaExtra\x")
+            self.assertEqual(config.display_path(r"D:\Profiles\Ada\x"), r"D:\Profiles\Ada\x")
+            self.assertEqual(config.display_path("/opt/tool"), "/opt/tool")
 
     def test_per_os_config_dir(self):
         del os.environ["AGIW_MCP_CONFIG_DIR"]
         with mock.patch.object(config.sys, "platform", "darwin"):
-            self.assertTrue(str(config.config_dir()).endswith("Library/Application Support/agiw-mcp"))
-        with mock.patch.object(config.sys, "platform", "linux"), mock.patch.object(config.os, "name", "posix"):
-            os.environ["XDG_CONFIG_HOME"] = str(self.tmp / "xdg")
-            self.assertEqual(config.config_dir(), self.tmp / "xdg" / "agiw-mcp")
+            self.assertEqual(config.config_dir(),
+                             config.Path.home() / "Library" / "Application Support" / "agiw-mcp")
+        if os.name == "nt":
+            # Path follows the real os.name; pretending this host is POSIX cannot build a path.
+            with mock.patch.object(config.sys, "platform", "win32"):
+                os.environ["APPDATA"] = str(self.tmp / "Roaming")
+                self.assertEqual(config.config_dir(), self.tmp / "Roaming" / "agiw-mcp")
+        else:
+            with mock.patch.object(config.sys, "platform", "linux"), mock.patch.object(config.os, "name", "posix"):
+                os.environ["XDG_CONFIG_HOME"] = str(self.tmp / "xdg")
+                self.assertEqual(config.config_dir(), self.tmp / "xdg" / "agiw-mcp")
 
 
 class NetworkGuardTests(IsolatedTestCase):
