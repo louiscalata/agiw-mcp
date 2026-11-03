@@ -81,8 +81,12 @@ def display_path(path) -> str:
         home = str(Path.home())
     except (RuntimeError, KeyError):
         return text
-    if home and home not in ("/", "\\") and (text == home or text.startswith(home + os.sep)):
-        return "~" + text[len(home):]
+    # Accept both separators so a Windows profile path hides home on any OS, and a POSIX path
+    # hides home when the process itself is running on Windows.
+    if home and home not in ("/", "\\"):
+        for separator in ("/", "\\"):
+            if text == home or text.startswith(home + separator):
+                return "~" + text[len(home):]
     return text
 
 
@@ -113,8 +117,10 @@ class Config:
     keychain_account: str = DEFAULT_ACCOUNT
     jev_model: str = DEFAULT_JEV_MODEL
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
-    # Sent as `reasoning_effort` on Nisi's chat requests. Reasoning models on LM Studio return empty content
-    # under JSON-schema output unless this is "none"; unset sends nothing, as before.
+    # Sent on Nisi's chat requests as top-level reasoning_effort (LM Studio) and
+    # chat_template_kwargs.reasoning_effort (llama-server, which ignores the top-level field).
+    # Reasoning models on LM Studio return empty content under JSON-schema output unless this is "none";
+    # unset sends nothing, as before.
     reasoning_effort: str | None = None
     # When true, agiw_nisi_run refuses requests without an admissible claim ticket (see tickets.py).
     require_ticket: bool = False

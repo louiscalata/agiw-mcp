@@ -89,6 +89,23 @@ class RpcTests(IsolatedTestCase):
         self.assertTrue(reply["result"]["isError"])
         self.assertEqual(reply["result"]["structuredContent"]["error"]["code"], "INPUT_INVALID")
 
+    def test_malformed_frame_without_a_method_is_a_parse_error(self):
+        replies = exchange(
+            frame({"jsonrpc": "2.0"}),
+            frame({"jsonrpc": "2.0", "id": 4}),
+            frame({"jsonrpc": "2.0", "id": 5, "result": {}, "error": {"code": -32600, "message": "x"}}),
+            frame({"jsonrpc": "2.0", "id": 8, "result": {"ok": True}, "extra": 1}),
+            frame({"jsonrpc": "2.0", "id": 9, "result": {"ok": True}}),
+            frame({"jsonrpc": "2.0", "id": 6, "method": "ping"}),
+        )
+        self.assertEqual(replies[:4], [
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+        ])
+        self.assertEqual(replies[4], {"jsonrpc": "2.0", "id": 6, "result": {}})
+
     def test_oversized_frame_is_discarded_and_stream_stays_aligned(self):
         big = b'{"jsonrpc":"2.0","id":1,"method":"ping","params":{"x":"' + b"a" * (rpc.MAX_LINE_BYTES + 10) + b'"}}\n'
         replies = exchange(big, frame({"jsonrpc": "2.0", "id": 2, "method": "ping"}))

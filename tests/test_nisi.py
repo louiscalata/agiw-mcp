@@ -7,7 +7,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from support import FakeModelServer, IsolatedTestCase, node_available, tree_snapshot, write_fake_node
+from support import (
+    FakeModelServer, IsolatedTestCase, node_availability, skip_without_node, tree_snapshot, write_fake_node,
+)
 
 from agiw_mcp import nisi, tools
 from agiw_mcp.config import load_config
@@ -52,6 +54,23 @@ class NisiInputTests(IsolatedTestCase):
         with self.assertRaises(ToolError) as ctx:
             nisi.run(args, load_config())
         self.assertEqual(ctx.exception.code, "MODELS_NOT_DISTINCT")
+
+    def test_files_and_new_files_share_the_path_limit(self):
+        files = [{"path": f"f{index}.py", "content": "x"} for index in range(nisi.MAX_FILES)]
+        new_files = [f"n{index}.py" for index in range(nisi.MAX_FILES)]
+        self.assertEqual(len(nisi.validate_request({"task": "edit", "files": files})["allowed"]), nisi.MAX_FILES)
+        only_new = nisi.validate_request({"task": "edit", "new_files": new_files})
+        self.assertEqual(len(only_new["allowed"]), nisi.MAX_FILES)
+        half = nisi.MAX_FILES // 2
+        combined = nisi.validate_request({"task": "edit", "files": files[:half], "new_files": new_files[:half]})
+        self.assertEqual(len(combined["allowed"]), nisi.MAX_FILES)
+        for case in ({"files": files, "new_files": new_files},
+                     {"files": files[:nisi.MAX_FILES - 1], "new_files": new_files[:2]}):
+            with self.subTest(files=len(case["files"]), new_files=len(case["new_files"])):
+                with self.assertRaises(ToolError) as ctx:
+                    nisi.validate_request({"task": "edit", **case})
+                self.assertEqual(ctx.exception.code, "INPUT_INVALID")
+                self.assertIn(str(nisi.MAX_FILES), ctx.exception.message)
 
 
 class ProbeEnvTests(IsolatedTestCase):
@@ -160,7 +179,36 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
         self.assertEqual(state, "timeout")
 
 
-@unittest.skipUnless(node_available(), "Node.js 22+ not available; FakeRunnerTests cover the Python side")
+def flags_or_skip(test, node, workdir):
+    """Return Node's permission flags, or skip when the probe cannot run."""
+    try:
+        return nisi.permission_flags(node, workdir)
+    except ToolError as exc:
+        if exc.code == "NODE_UNAVAILABLE":
+            test.skipTest("Node.js is not available: " + exc.message)
+        raise
+
+
+class NodeUnavailableSkipTests(IsolatedTestCase):
+    def test_unusable_node_skips_with_a_clear_reason(self):
+        saved = dict(nisi._FLAG_CACHE)
+        self.addCleanup(nisi._FLAG_CACHE.update, saved)
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        nisi._FLAG_CACHE.clear()
+        crashed = subprocess.CompletedProcess(["node", "--help"], 1, b"", b"")
+        with mock.patch.object(nisi, "find_node", return_value=("/usr/bin/node", (22, 0, 0))), \
+                mock.patch.object(nisi.subprocess, "run", return_value=crashed):
+            available, reason = node_availability()
+            self.assertFalse(available)
+            self.assertIn("Node.js is not available", reason)
+            self.assertIn("node --help failed", reason)
+            with self.assertRaises(unittest.SkipTest) as ctx:
+                flags_or_skip(self, "/usr/bin/node", "/work")
+        self.assertIn("Node.js is not available", str(ctx.exception))
+        self.assertIn("node --help failed", str(ctx.exception))
+
+
+@skip_without_node
 class NisiEndToEndTests(IsolatedTestCase):
     """Real Node and the vendored Nisi against a fake loopback model server."""
 
@@ -295,7 +343,7 @@ class NisiEndToEndTests(IsolatedTestCase):
             self.assertFalse({"TYPESAFE_API_KEY", "HTTPS_PROXY", "https_proxy", "ALL_PROXY"} & set(names), names)
             seen.unlink()
 
-        nisi.permission_flags(str(fake), "/work")
+        flags_or_skip(self, str(fake), "/work")
         check()
         with mock.patch.object(nisi.shutil, "which", return_value=str(fake)):
             self.assertEqual(nisi.find_node(), (str(fake), (22, 13, 0)))
@@ -328,7 +376,7 @@ class NisiEndToEndTests(IsolatedTestCase):
             fake = write_fake_node(self.tmp / f"bin{index}", f"import sys\nsys.stdout.write({text!r})\n")
             nisi._FLAG_CACHE.clear()
             self.addCleanup(nisi._FLAG_CACHE.clear)
-            flags, sandbox = nisi.permission_flags(str(fake), "/work")
+            flags, sandbox = flags_or_skip(self, str(fake), "/work")
             self.assertEqual(flags[0] if flags else None, expected, text)
             self.assertEqual(sandbox, "node-permission" if expected else "none")
 
@@ -344,7 +392,7 @@ class NisiEndToEndTests(IsolatedTestCase):
             "catch (error) { console.log(error.code); }\n"
             f"fs.writeFileSync({json.dumps(str(work / 'inside.txt'))}, 'ok'); console.log('INSIDE');\n",
             encoding="utf-8")
-        flags, sandbox = nisi.permission_flags(node, str(work))
+        flags, sandbox = flags_or_skip(self, node, str(work))
         if sandbox != "node-permission":
             self.skipTest("this Node has no permission model")
         done = subprocess.run([node, *flags, str(script)], capture_output=True, timeout=30,
@@ -403,6 +451,25 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertIn("bad.mjs:2", messages)
         self.assertIn("SyntaxError", messages)
         self.assertNotIn("[stdin]", messages)
+
+    def test_long_empty_file_list_stays_within_the_finding_limit(self):
+        # A joined path list longer than 2048 used to become TESTS_FINDING_INVALID and block repair.
+        names = [f"{'e' * 96}{index:02d}.txt" for index in range(24)]
+        self.assertGreater(len(f"Empty proposed files: {', '.join(names)}."), 2048)
+        self.models.draft = lambda prompt: {"candidate": {"files": [
+            {"path": name, "content": ""} for name in names]}, "note": "Empty draft."}
+        self.models.repair = lambda prompt: {"status": "REPAIRED", "candidate": {"files": [
+            {"path": name, "content": "filled\n"} for name in names]}, "note": "Filled the files."}
+        result = self.run_tool({"task": "Fill the new files.", "new_files": names, "repair_budget": 1})
+        self.assertEqual(result["outcome"], "COMPLETED", result)
+        self.assertEqual(result["repairAttempts"], 1)
+        failed = [stage for stage in result["stages"]
+                  if stage.get("stage") == "tests" and stage.get("status") == "FAIL"]
+        self.assertEqual(len(failed), 1, result)
+        failure = failed[0]["failures"][0]
+        self.assertEqual(failure["code"], "EMPTY_FILE")
+        self.assertLessEqual(len(failure["message"]), 2048)
+        self.assertTrue(failure["message"].startswith("Empty proposed files:"))
 
 
 if __name__ == "__main__":

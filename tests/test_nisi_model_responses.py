@@ -2,10 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 from pathlib import Path
-import unittest
 from unittest import mock
 
-from support import IsolatedTestCase, node_available
+from support import IsolatedTestCase, skip_without_node
 
 from agiw_mcp import nisi, tools
 
@@ -13,7 +12,7 @@ REASONING = "private reasoning sentinel: never use this as candidate content"
 FIXED = "def add(a, b):\n    return a + b\n"
 
 
-@unittest.skipUnless(node_available(), "Node.js 22+ required for the real runner fixture")
+@skip_without_node
 class ModelResponseTests(IsolatedTestCase):
     FETCH_FIXTURE = r'''
 import fs from 'node:fs';
@@ -123,6 +122,26 @@ globalThis.fetch = async (url, init) => {
                         self.assertNotIn("reasoning_effort", body)
                     else:
                         self.assertEqual(body["reasoning_effort"], effort)
+
+    def test_reasoning_effort_is_sent_in_chat_template_kwargs(self):
+        # llama-server ignores a top-level reasoning_effort and reads chat_template_kwargs.
+        for effort in ("none", "low", "high"):
+            with self.subTest(effort=effort):
+                self.write_config(model_base_url="http://127.0.0.1:1235/v1", author_model="author-model",
+                                  reviewer_model="reviewer-model", reasoning_effort=effort)
+                result, is_error = self.run_tool()
+                self.assertFalse(is_error, result)
+                self.assertEqual(len(self.bodies), 2)
+                for body in self.bodies:
+                    self.assertEqual(body["chat_template_kwargs"], {"reasoning_effort": effort})
+                    self.assertEqual(body["reasoning_effort"], effort)
+        self.write_config(model_base_url="http://127.0.0.1:1235/v1", author_model="author-model",
+                          reviewer_model="reviewer-model")
+        result, is_error = self.run_tool()
+        self.assertFalse(is_error, result)
+        for body in self.bodies:
+            self.assertNotIn("chat_template_kwargs", body)
+            self.assertNotIn("reasoning_effort", body)
 
     def test_chunked_reasoning_only_response_is_refused(self):
         self.fixture["chunked"] = True
