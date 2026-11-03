@@ -35,7 +35,8 @@ hosted by TypeSafe. Each call sends one HTTPS POST request to
 4. Your TypeSafe API key, in the Authorization header.
 
 TypeSafe also receives your IP address and standard request metadata. Nothing
-else is sent: no files, file paths, model names, configuration or environment.
+else is collected automatically: no files, file paths, local model names, other
+configuration or environment. Anything included in your supplied text is sent.
 agiw_readiness, agiw_status, agiw_consent and agiw_nisi_run never contact
 TypeSafe. A failed call is not retried automatically. TypeSafe's own terms and
 any usage charges apply. Jev's answers are advisory, not a verdict.
@@ -102,7 +103,7 @@ def show() -> dict:
     return {"granted": consent_recorded(), "staleConsent": stale, "endpoint": JEV_ENDPOINT,
             "disclosure": disclosure_text(), "disclosureSha256": disclosure_sha256(),
             "consentFile": display_path(_path()),
-            "howToGrant": ("Only the user can grant consent: if they agree to this disclosure, they run "
+            "howToGrant": ("To grant consent after reading this disclosure, run "
                            "`agiw-mcp consent grant` in a terminal. This tool cannot grant it.")}
 
 
@@ -110,7 +111,7 @@ def grant(disclosure_hash) -> dict:
     if disclosure_hash != disclosure_sha256():
         raise ToolError("DISCLOSURE_MISMATCH",
                         "Consent was not recorded. Call agiw_consent with action \"show\", let the user read the "
-                        "disclosure, and pass its current disclosure_sha256 when they agree.")
+                        "disclosure, then run `agiw-mcp consent grant` in a terminal if they agree.")
     try:
         write_private_json(_path(), {"schema": 1, "granted": True, "grantedAt": _now(),
                                      "disclosureSha256": disclosure_sha256()})

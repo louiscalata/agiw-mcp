@@ -16,7 +16,7 @@ from agiw_mcp import nisi, tickets, tools
 from agiw_mcp.config import load_config
 from agiw_mcp.errors import ToolError
 
-ARGS = {"task": "Fix add", "files": [{"path": "calc.py", "content": "def add(a, b):\n    return a - b\n"}]}
+ARGS = {"task": "Fix add", "files": [{"path": "src/calc.py", "content": "def add(a, b):\n    return a - b\n"}]}
 WINDOWS_ALIASES = ("calc.py.", "calc.py ", "src./a.py", "src /a.py", "a/b.", "a/b..", "CON", "con.txt",
                    "src/NUL.tar.gz", "Com1", "lpt9.log", "aux ", "con .txt", "PRN", "COM¹", "conin$",
                    "a:b", "calc.py:stream", "c:", "src/a.py::$DATA", " src", "src ")
@@ -262,8 +262,8 @@ class RegistryTests(IsolatedTestCase):
         patches = self.lock_writes(chunk=1)
         with patches[0], patches[1], patches[2]:
             self.registry.admit(ticket("T-1", scope=("src/a.py", "docs")))
-        self.assertEqual(self.records(), [{"scope": "docs", "ticketId": "T-1"},
-                                          {"scope": "src/a.py", "ticketId": "T-1"}])
+        self.assertEqual(self.records(), [{"scope": "docs", "ticketId": "T-1", "owner": "writer"},
+                                          {"scope": "src/a.py", "ticketId": "T-1", "owner": "writer"}])
         with self.assertRaises(ToolError):
             self.registry.admit(ticket("T-2", scope=("src",)))
 
@@ -304,7 +304,7 @@ class RegistryTests(IsolatedTestCase):
         self.assertEqual(tickets._scope_name("README.md"), tickets._scope_name("readme.MD"))
         self.assertEqual(tickets._scope_name("café"), tickets._scope_name("CAFÉ"))
         self.registry.admit(ticket("T-1", scope=("Docs/Guide.md",)))
-        self.assertEqual(self.records(), [{"scope": "docs/guide.md", "ticketId": "T-1"}])
+        self.assertEqual(self.records(), [{"scope": "docs/guide.md", "ticketId": "T-1", "owner": "writer"}])
 
     @unittest.skipUnless(tickets._DIR_FD, "POSIX directory checks")
     def test_registry_dir_created_private(self):
@@ -497,7 +497,7 @@ class RegistryTests(IsolatedTestCase):
         newer = tickets.Registry(self.root)
         newer.admit(ticket("T-2", scope=("src",)))
         self.assertTrue(self.registry.release("T-1"))
-        self.assertEqual(self.records(), [{"scope": "src", "ticketId": "T-2"}])
+        self.assertEqual(self.records(), [{"scope": "src", "ticketId": "T-2", "owner": "writer"}])
         # T-1's own lock went with the directory it was created in.
         self.assertEqual(self.scope_files(aside), [])
         with self.assertRaises(ToolError) as ctx:
@@ -528,8 +528,8 @@ class RegistryTests(IsolatedTestCase):
             newer = tickets.Registry(self.root)
             newer.admit(ticket("T-2", scope=("src",)))
             self.assertTrue(self.registry.release("T-1"))
-            self.assertEqual(self.records(), [{"scope": "src", "ticketId": "T-2"}])
-            self.assertEqual(self.records(aside), [{"scope": "src", "ticketId": "T-1"}])
+            self.assertEqual(self.records(), [{"scope": "src", "ticketId": "T-2", "owner": "writer"}])
+            self.assertEqual(self.records(aside), [{"scope": "src", "ticketId": "T-1", "owner": "writer"}])
             self.assertTrue(newer.release("T-2"))
             self.assertEqual(self.scope_files(), [])
 

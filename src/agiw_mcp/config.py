@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration, the per-OS config directory and private file writes.
 
-The config file is optional and closed: unknown keys are refused. Four values
+The config file is optional and closed: unknown keys are refused. Five values
 can also come from the environment so an MCP client entry can carry them:
 AGIW_MCP_BASE_URL (the legacy name AGIW_MCP_MODEL_BASE_URL is used only when
 AGIW_MCP_BASE_URL is unset), AGIW_MCP_AUTHOR_MODEL, AGIW_MCP_REVIEWER_MODEL and
@@ -14,7 +14,7 @@ Reasoning effort accepts "none", "low", "medium" or
 Nisi's chat requests.
 require_ticket (default false) makes agiw_nisi_run refuse any request without an
 admissible claim ticket; a ticket passed in the arguments is enforced either way.
-The Jev endpoint is not configurable outside test mode.
+The Jev endpoint is not configurable.
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def config_dir() -> Path:
     if override:
         path = Path(override)
         if not path.is_absolute():
-            raise ToolError("CONFIG_DIR_INVALID", "AGIW_MCP_CONFIG_DIR must be an absolute path.")
+            raise ConfigError("CONFIG_DIR_INVALID", "AGIW_MCP_CONFIG_DIR must be an absolute path.")
         return path
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / APP_DIR_NAME
@@ -243,7 +243,9 @@ def config_file_path() -> Path:
 
 
 def ensure_private_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
+    if not path.parent.exists():
+        ensure_private_dir(path.parent)
+    path.mkdir(mode=0o700, exist_ok=True)
     if os.name == "posix":
         try:
             os.chmod(path, 0o700)

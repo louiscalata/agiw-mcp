@@ -71,7 +71,8 @@ class ReadinessTests(IsolatedTestCase):
         with mock.patch.object(readiness.keys, "key_presence", return_value={"present": True, "source": "x"}) as probe:
             for stop_at_first in (True, False):
                 result = readiness.evaluate(stop_at_first=stop_at_first)
-                self.assertEqual(result["missing"]["id"], "consent", result)
+                self.assertEqual(result["status"], "READY", result)
+                self.assertEqual(result["jev"]["status"], "NOT_READY")
             status, is_error = tools.call_tool("agiw_status", {})
             self.assertFalse(is_error, status)
             self.assertEqual(probe.call_count, 0)
@@ -82,7 +83,8 @@ class ReadinessTests(IsolatedTestCase):
     def test_order_and_first_missing(self):
         self.make_ready()
         del os.environ["TYPESAFE_API_KEY"]
-        self.assertEqual(self.missing(), "jev_key")
+        self.assertEqual(readiness.evaluate()["jev"]["checks"][-1]["id"], "jev_key")
+        self.assertEqual(readiness.evaluate()["jev"]["status"], "NOT_READY")
         self.find_node.return_value = (None, None)
         self.assertEqual(self.missing(), "node")
 
@@ -94,7 +96,8 @@ class ReadinessTests(IsolatedTestCase):
     def test_consent_missing(self):
         self.configure()
         os.environ["TYPESAFE_API_KEY"] = "tsk_fake_" + "0123456789"
-        self.assertEqual(self.missing(), "consent")
+        self.assertEqual(readiness.evaluate()["status"], "READY")
+        self.assertEqual(readiness.evaluate()["jev"]["status"], "NOT_READY")
 
     def test_models_not_configured_or_identical(self):
         self.assertEqual(self.missing(), "models")

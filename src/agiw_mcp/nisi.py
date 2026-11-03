@@ -4,7 +4,7 @@
 
 The caller passes file contents, not paths. agiw-mcp never reads or writes the
 user's project. Each run gets a private temporary directory (mode 0700) that
-receives a hash-verified copy of Nisi and the runner, and is removed afterwards.
+receives a hash-verified copy of Nisi plus the host runner, and is removed afterwards.
 Node's version and permission probes receive only PATH, LANG=C.UTF-8 and
 NODE_NO_WARNINGS=1. A failed permission probe refuses the run with
 NODE_UNAVAILABLE. When Node exposes a supported permission flag, the runner
@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 from . import tickets
 from .config import Config
@@ -220,7 +221,7 @@ def _path_ok(path) -> bool:
     if not isinstance(path, str) or not 1 <= len(path) <= 256 or "\\" in path or path.startswith("/"):
         return False
     parts = path.split("/")
-    return all(_PATH_PART.fullmatch(part) and part not in (".", "..") for part in parts)
+    return all(_PATH_PART.fullmatch(part) and tickets._part_ok(tickets.canonical_scope(part)) for part in parts)
 
 
 def _text(value, name: str, limit: int) -> str:
@@ -249,7 +250,8 @@ def validate_request(args: dict) -> dict:
             raise ToolError("INPUT_INVALID", "Each file must be an object with exactly path and content.")
         path, content = item["path"], item["content"]
         if not _path_ok(path):
-            raise ToolError("INPUT_INVALID", "File paths must be relative, use '/', and have no '.' or '..' parts.")
+            raise ToolError("INPUT_INVALID", "File paths must be relative ASCII paths (letters, digits, ._@+- and /), "
+                            "without '.', '..', trailing-dot or Windows device-name parts.")
         if path in seen:
             raise ToolError("INPUT_INVALID", "File paths must be unique.")
         if not isinstance(content, str) or "\x00" in content:
@@ -303,6 +305,15 @@ def validate_request(args: dict) -> dict:
 
 # --- bounded process -------------------------------------------------------
 
+# Set only by the stdio request worker; direct library calls have no cancellation event.
+_CANCEL = threading.local()
+
+
+def _cancelled() -> bool:
+    event = getattr(_CANCEL, "event", None)
+    return event is not None and event.is_set()
+
+
 def _kill_tree(proc: subprocess.Popen) -> None:
     try:
         if os.name == "posix":
@@ -317,6 +328,8 @@ def _bounded_run(argv: list[str], *, data: bytes, cwd: str, env: dict, timeout: 
     """Run a child with capped output and a wall-clock limit. Returns (code, stdout, state)."""
     extra = {"start_new_session": True} if os.name == "posix" else {
         "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    if _cancelled():
+        raise ToolError("NISI_CANCELLED", "The Nisi request was cancelled.")
     proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             cwd=cwd, env=env, **extra)
     out = bytearray()
@@ -355,13 +368,26 @@ def _bounded_run(argv: list[str], *, data: bytes, cwd: str, env: dict, timeout: 
                threading.Thread(target=feed, daemon=True)]
     for thread in threads:
         thread.start()
-    state = "exited"
+    state = "running"
     try:
-        code = proc.wait(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        while True:
+            if _cancelled():
+                raise ToolError("NISI_CANCELLED", "The Nisi request was cancelled.")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            try:
+                code = proc.wait(timeout=min(0.1, remaining))
+                state = "exited"
+                break
+            except subprocess.TimeoutExpired:
+                continue
     except subprocess.TimeoutExpired:
         state, code = "timeout", None
     finally:
-        _kill_tree(proc)
+        if state != "exited":
+            _kill_tree(proc)
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
@@ -430,6 +456,11 @@ def run(args: dict, config: Config, *, temp_parent: str | None = None) -> dict:
         raise ToolError("MODELS_NOT_DISTINCT", "author_model and reviewer_model must be different models.")
     if ticket is None:
         return _run_validated(request, config, temp_parent)
+    for path in request["allowed"]:
+        canonical = tickets.canonical_scope(path)
+        if not any(canonical == scope or canonical.startswith(scope + "/") for scope in ticket["writeScope"]):
+            raise ToolError("TICKET_SCOPE_MISMATCH", "Every proposed path must be within the ticket writeScope.",
+                            ticketId=ticket["ticketId"])
     registry = tickets.registry()
     admission = registry.admit(args["ticket"])
     try:
@@ -453,9 +484,11 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
         "acceptanceCriteria": criteria, "assertions": request["assertions"],
         "repairBudget": request["repair_budget"], "deadlineMs": request["timeout"] * 1000,
         "endpoint": config.chat_endpoint, "authorModel": config.author_model,
-        "reviewerModel": config.reviewer_model, "reviewerEndpoint": config.reviewer_chat_endpoint, "maxOutputTokens": config.max_output_tokens,
+        "reviewerModel": config.reviewer_model, "reviewerEndpoint": config.reviewer_chat_endpoint,
+        "maxOutputTokens": config.max_output_tokens,
         "reasoningEffort": config.reasoning_effort,
         "language": request["language"], "python": sys.executable or "", "checkTimeoutMs": 15000,
+        "pythonVersion": sys.version.split()[0],
     }
     workdir = tempfile.mkdtemp(prefix="agiw-mcp-nisi-", dir=temp_parent)
     try:
@@ -502,7 +535,7 @@ def _summarize(result: dict, request: dict, sandbox: str, reasoning_effort: str 
             "unchanged" if original[item["path"]] == item["content"] else "modified")
         proposed.append({"path": item["path"], "status": status, "content": item["content"]})
     if total > MAX_OUTPUT_CONTENT_BYTES:
-        raise ToolError("NISI_OUTPUT_TOO_LARGE", "The proposed files exceed 2 MB and were not returned.")
+        raise ToolError("NISI_OUTPUT_TOO_LARGE", "The proposed files exceed 2 MiB and were not returned.")
     stages = []
     for stage in report.get("stages", []):
         if not isinstance(stage, dict):
@@ -526,6 +559,8 @@ def _summarize(result: dict, request: dict, sandbox: str, reasoning_effort: str 
         "stages": stages,
         "runId": report.get("runId"),
         "taskFingerprint": report.get("taskFingerprint"),
+        "inputFingerprint": result.get("inputFingerprint"),
+        "pythonCheckerVersion": sys.version.split()[0],
         "candidateFingerprint": report.get("candidateFingerprint"),
         "modelReceipts": result.get("receipts") if isinstance(result.get("receipts"), dict) else {},
         "nisiVersion": NISI_VERSION,

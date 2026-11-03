@@ -76,8 +76,14 @@ class NetTests(IsolatedTestCase):
         with self.assertRaises(net.HttpFailure) as ctx:
             net.request_json(f"http://127.0.0.1:{port}/v1/models", timeout=1.0, max_bytes=8192)
         elapsed = time.monotonic() - started
-        self.assertEqual(ctx.exception.kind, "unreachable")
+        self.assertEqual(ctx.exception.kind, "timeout")
         self.assertLess(elapsed, 2.0)
+        thread.join(timeout=1)
+        self.assertFalse(thread.is_alive(), "peer connection survived timeout")
+        workers = [worker for worker in threading.enumerate() if worker.name == "agiw-mcp-http"]
+        for worker in workers:
+            worker.join(timeout=1)
+        self.assertFalse(any(worker.is_alive() for worker in workers))
 
 
 if __name__ == "__main__":

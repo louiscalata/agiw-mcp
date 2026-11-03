@@ -5,15 +5,19 @@
 Only JSON-RPC frames are written to stdout; diagnostics go to stderr and never
 contain request content. Incoming lines are bounded; an oversized line is
 discarded up to its newline so the next frame stays aligned. Requests are
-handled one at a time.
+serialized per process; ping and cancellation remain responsive during Nisi runs.
 """
 from __future__ import annotations
 
+from collections import deque
 import json
+import queue
+import threading
 import sys
 from typing import BinaryIO
 
 from . import SERVER_NAME, __version__
+from . import nisi
 from .tools import TOOL_NAMES, TOOLS, call_tool
 
 MAX_LINE_BYTES = 4 * 1024 * 1024
@@ -21,11 +25,12 @@ MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 SUPPORTED_PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
     "AGIW MCP. When the user says \"initiate online code mode\" with no task, call agiw_readiness and report READY "
-    "or the first missing prerequisite with its fix; start nothing else. With a task: agiw_jev_pre on the task "
-    "text (advisory), agiw_nisi_run with the relevant file contents, review the proposed contents yourself, then "
-    "agiw_jev_post on the result. Jev answers are advisory, not a verdict. Never grant consent unless the user "
-    "explicitly agreed after reading agiw_consent show. agiw_nisi_run never writes project files; applying its "
-    "proposed contents is a separate decision."
+    "or the first missing local prerequisite with its fix; start nothing else. With a task: use agiw_nisi_run "
+    "with the relevant file contents and review the proposed contents yourself. Jev pre/post checks are optional "
+    "and require recorded consent and a key. Jev answers are advisory, not a verdict. The agiw_consent tool "
+    "cannot grant consent. Ask the user to read the disclosure and run the consent CLI themselves; do not "
+    "write consent.json or automate the prompt. Same-user shell or file access can change the consent record. "
+    "agiw_nisi_run never writes project files; applying its proposed contents is a separate decision."
 )
 
 PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR = -32700, -32600, -32601, -32602, -32603
@@ -167,30 +172,116 @@ def read_frame(stream: BinaryIO) -> bytes | None:
 def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
     stdin = stdin or sys.stdin.buffer
     stdout = stdout or sys.stdout.buffer
-    while True:
-        try:
-            frame = read_frame(stdin)
-        except _FrameTooLarge:
-            _diag("discarded an oversized frame")
-            stdout.write(encode(_error(None, PARSE_ERROR, "Parse error: frame too large")))
-            stdout.flush()
-            continue
-        if frame is None:
-            return 0
-        if not frame.strip():
-            continue
-        try:
-            message = decode_frame(frame)
-        except (ValueError, UnicodeError, RecursionError):
-            stdout.write(encode(_error(None, PARSE_ERROR, "Parse error")))
-            stdout.flush()
-            continue
-        try:
-            reply = handle(message)
-        except Exception as exc:  # noqa: BLE001 - keep serving; never echo exception text
-            _diag("internal error: " + type(exc).__name__)
-            identifier = message.get("id") if isinstance(message, dict) and _valid_id(message.get("id")) else None
-            reply = _error(identifier, INTERNAL_ERROR, "Internal error")
+    events = queue.Queue(maxsize=16)
+    stopped = threading.Event()
+    pending = deque()
+    active = None
+
+    def post(event):
+        while not stopped.is_set():
+            try:
+                events.put(event, timeout=0.1)
+                return
+            except queue.Full:
+                continue
+
+    def read():
+        while not stopped.is_set():
+            try:
+                frame = read_frame(stdin)
+            except _FrameTooLarge:
+                post(("large", None))
+                continue
+            except (OSError, ValueError):
+                frame = None
+            post(("frame", frame))
+            if frame is None:
+                return
+
+    def respond(reply):
         if reply is not None:
             stdout.write(encode(reply))
             stdout.flush()
+
+    def dispatch(message):
+        try:
+            return handle(message)
+        except Exception as exc:
+            _diag("internal error: " + type(exc).__name__)
+            identifier = message.get("id") if isinstance(message, dict) and _valid_id(message.get("id")) else None
+            return _error(identifier, INTERNAL_ERROR, "Internal error")
+
+    def run(message, cancel):
+        nisi._CANCEL.event = cancel
+        try:
+            post(("done", dispatch(message)))
+        finally:
+            del nisi._CANCEL.event
+
+    reader = threading.Thread(target=read, name="agiw-mcp-stdin", daemon=True)
+    reader.start()
+    try:
+        while True:
+            from_pending = False
+            try:
+                # Honor buffered cancellation/EOF before dispatching queued work.
+                kind, value = events.get_nowait() if active is None and pending else events.get()
+            except queue.Empty:
+                message = pending.popleft()
+                from_pending = True
+            else:
+                if kind == "done":
+                    if not active[1].is_set():
+                        respond(value)
+                    active[2].join()
+                    active = None
+                    continue
+                if kind == "large":
+                    _diag("discarded an oversized frame")
+                    respond(_error(None, PARSE_ERROR, "Parse error: frame too large"))
+                    continue
+                if value is None:
+                    return 0
+                if not value.strip():
+                    continue
+                try:
+                    message = decode_frame(value)
+                except (ValueError, UnicodeError, RecursionError):
+                    respond(_error(None, PARSE_ERROR, "Parse error"))
+                    continue
+            if (isinstance(message, dict) and message.get("jsonrpc") == "2.0"
+                    and "id" not in message and message.get("method") == "notifications/cancelled"):
+                params = message.get("params")
+                identifier = params.get("requestId") if isinstance(params, dict) else None
+                if _valid_id(identifier):
+                    if active and type(identifier) is type(active[0]) and identifier == active[0]:
+                        active[1].set()
+                    pending = deque(item for item in pending if not (
+                        isinstance(item, dict) and type(item.get("id")) is type(identifier)
+                        and item.get("id") == identifier))
+                continue
+            if not from_pending and (active is not None or pending):
+                if isinstance(message, dict) and message.get("method") == "ping":
+                    respond(dispatch(message))
+                elif len(pending) < 16:
+                    pending.append(message)
+                elif isinstance(message, dict) and _valid_id(message.get("id")):
+                    respond(_error(message["id"], INTERNAL_ERROR, "Server busy"))
+                continue
+            # Only the long-running Nisi tool needs a worker. Other tools retain synchronous ordering.
+            params = message.get("params") if isinstance(message, dict) else None
+            if (isinstance(message, dict) and message.get("method") == "tools/call"
+                    and _valid_id(message.get("id")) and isinstance(params, dict)
+                    and params.get("name") == "agiw_nisi_run"):
+                cancel = threading.Event()
+                worker = threading.Thread(target=run, args=(message, cancel), name="agiw-mcp-nisi")
+                active = (message["id"], cancel, worker)
+                worker.start()
+            else:
+                respond(dispatch(message))
+    finally:
+        stopped.set()
+        if active is not None:
+            active[1].set()
+            active[2].join()
+        reader.join(timeout=0.2)

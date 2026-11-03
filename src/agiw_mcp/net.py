@@ -8,13 +8,66 @@ is not a loopback literal is refused before a socket opens.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 
 from .config import test_mode
+
+# Even DNS or TLS setup that cannot be interrupted may occupy only two workers.
+_WORKERS = threading.BoundedSemaphore(2)
+_LOCAL = threading.local()
+
+
+class _Exchange:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.cancelled = False
+        self.sockets = []
+
+    def track(self, sock):
+        with self.lock:
+            if self.cancelled:
+                sock.close()
+                raise OSError("request cancelled")
+            self.sockets.append(sock)
+
+    def cancel(self):
+        with self.lock:
+            self.cancelled = True
+            for sock in self.sockets:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                sock.close()
+
+
+class _HTTPConnection(http.client.HTTPConnection):
+    def connect(self):
+        super().connect()
+        _LOCAL.exchange.track(self.sock)
+
+
+class _HTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        super().connect()
+        _LOCAL.exchange.track(self.sock)
+
+
+class _HTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_HTTPConnection, req)
+
+
+class _HTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_HTTPSConnection, req, context=self._context)
+
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -54,7 +107,8 @@ def guard(url: str) -> None:
 def _opener():
     # Never use HTTP(S)_PROXY or system proxies: loopback traffic stays local, and the Jev request goes
     # straight to the endpoint named in the consent disclosure.
-    return urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}),
+                                       _HTTPHandler(), _HTTPSHandler())
 
 
 def request_json(url: str, *, method: str = "GET", body: dict | None = None, headers: dict | None = None,
@@ -72,22 +126,33 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     all_headers.update(headers or {})
     req = urllib.request.Request(url, data=data, method=method, headers=all_headers)
     outcome: dict = {}
+    if not _WORKERS.acquire(blocking=False):
+        raise HttpFailure("busy")
+    active = _Exchange()
 
     def exchange() -> None:
+        _LOCAL.exchange = active
         try:
             with _opener().open(req, timeout=timeout) as resp:
                 outcome["raw"] = resp.read(max_bytes + 1)
                 outcome["status"] = resp.status
         except BaseException as exc:  # noqa: B036 - handed to the caller's thread below
             outcome["error"] = exc
+        finally:
+            active.cancel()
+            _WORKERS.release()
+            del _LOCAL.exchange
 
     worker = threading.Thread(target=exchange, name="agiw-mcp-http", daemon=True)
-    worker.start()
+    try:
+        worker.start()
+    except BaseException:
+        _WORKERS.release()
+        raise
     worker.join(timeout)
     if worker.is_alive():
-        # Abandoned: a worker still blocked on a trickling server ends when that server stops or closes,
-        # and nothing it reads is used.
-        raise HttpFailure("unreachable")
+        active.cancel()
+        raise HttpFailure("timeout")
     try:
         if "error" in outcome:
             raise outcome["error"]

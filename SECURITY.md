@@ -4,23 +4,27 @@
 
 Please report vulnerabilities privately through GitHub's "Report a
 vulnerability" (security advisories) on `louiscalata/agiw-mcp`, not in a
-public issue. Include the version and the steps to reproduce.
+public issue. Include the version, source commit, any local changes and the steps to reproduce.
 
 ## What leaves the machine
 
 | Tool | Network destination | What is sent |
 |---|---|---|
-| `agiw_readiness`, `agiw_status` | your loopback model server only (`GET /models`; agiw-mcp waits up to 3 s per request, but the worker thread and socket may outlive that wait) | nothing but the request line and headers |
+| `agiw_readiness`, `agiw_status` | your loopback model server only (`GET /models`; agiw-mcp waits up to 3 s per request) | nothing but the request line and headers |
 | `agiw_consent` | none | nothing |
 | `agiw_nisi_run` | your loopback model server only | the task text, the file contents you supplied, Nisi's prompts |
-| `agiw_jev_pre`, `agiw_jev_post` | `https://api.typesafe.ai/v1/systemone` | your text (pre: at most 12 KB; post: truncated to 12 KB), the fixed questions, the Jev model name, and your API key in the `Authorization` header |
+| `agiw_jev_pre`, `agiw_jev_post` | `https://api.typesafe.ai/v1/systemone` | your text (pre: at most 12 KiB; post: truncated to 12 KiB), the fixed questions, the Jev model name, and your API key in the `Authorization` header |
 
 TypeSafe also sees your IP address and standard request metadata. The exact
 disclosure is returned by `agiw_consent` (`show`) and `agiw-mcp consent show`.
 agiw-mcp does not remove secrets from the text you pass to the Jev tools; do
 not include any.
 
-There is no telemetry and no update check.
+There is no telemetry and no update check. Python HTTP deadlines shut down tracked
+sockets, including stalled headers and bodies. DNS/connect/TLS setup may outlive
+the caller's deadline; at most two HTTP workers may remain outstanding per process,
+and further calls fail rather than accumulating workers. A failed or timed-out Jev
+exchange may already have sent its request. There is no automatic retry.
 
 ## Consent
 
@@ -32,10 +36,10 @@ There is no telemetry and no update check.
   never its value.
 - Consent is bound to the SHA-256 of the disclosure text. A changed disclosure
   invalidates earlier consent.
-- Only the user can grant consent, by running `agiw-mcp consent grant` in an
-  interactive terminal and typing the confirmation. The `agiw_consent` tool
-  can show the disclosure and revoke consent, but it refuses to grant it, so
-  an assistant cannot consent on the user's behalf.
+- The `agiw_consent` tool can show or revoke consent but cannot grant it.
+  `agiw-mcp consent grant` asks for confirmation in an interactive terminal.
+  Any same-user process with shell or config write access, including an assistant,
+  can grant or forge the JSON record. This is not an OS user-presence control.
 - Consent is stored in `consent.json` in the config directory. On macOS and
   Linux, each write replaces it with a new file set to mode 0600. Setting the
   directory to mode 0700 is best effort.
@@ -61,10 +65,11 @@ There is no telemetry and no update check.
 - Inputs are file contents in the request, never paths. agiw-mcp does not read
   or write project files.
 - Each run gets a fresh private temporary directory (mode 0700). The vendored
-  Nisi files are copied into it and every copied byte is checked against the
-  pinned manifest (itself pinned by SHA-256) before Node starts. agiw-mcp
-  attempts to remove the directory afterwards, also on failure and timeout;
-  removal errors are ignored. The test suite checks selected project, home
+  Nisi files are copied into it and their bytes are checked against the pinned
+  manifest (itself pinned by SHA-256) before Node starts. The host runner is
+  copied separately and is not covered by that manifest. agiw-mcp
+  attempts to remove the directory afterwards, also on failure, timeout, cancellation,
+  stdin EOF and handled SIGTERM/SIGHUP; removal errors are ignored. The test suite checks selected project, home
   and config directories for changes.
 - Node's version and permission probes (`node --version` and `node --help`)
   run with the inherited `PATH`, `LANG=C.UTF-8` and `NODE_NO_WARNINGS=1`.
@@ -89,11 +94,13 @@ There is no telemetry and no update check.
   set to their parent values when present. The runner also has a
   wall-clock limit and capped output. On timeout, agiw-mcp kills the process
   group on POSIX and only the runner process on Windows.
-- Generated code is never executed. Static checks only parse it: `node --check`
-  for JavaScript, Python's `ast.parse` in an isolated interpreter (`-I -S -B`),
+- Generated code is never executed. Static checks compile or parse without execution: `node --check`
+  for JavaScript, Python's `compile` in an isolated interpreter (`-I -S -B`),
   and `JSON.parse`. These checker processes are started by the runner, which is
   why `--allow-child-process` is set; they are fixed commands with the
-  candidate as data.
+  candidate as data. When Node advertises `--allow-net`, that flag is also set;
+  it permits network access generally. Loopback restrictions are enforced by
+  application URL validation, not by Node's network permission flag.
 - The model endpoint must be a loopback literal (`127.0.0.1` or `[::1]`) over
   HTTP, checked by agiw-mcp and again by Nisi's adapter. agiw-mcp cannot verify
   what the server behind that port does with the data.
@@ -102,7 +109,7 @@ There is no telemetry and no update check.
 
 In scope:
 
-- An assistant or prompt injection trying to use the Jev tools without consent,
+- An MCP caller trying to use the Jev tools without a recorded consent file,
   or to make agiw-mcp send the key or text somewhere other than TypeSafe.
 - Leaking the key or local paths through error messages, logs or tool output.
 - A Nisi run changing files outside its temporary directory.
@@ -112,6 +119,8 @@ In scope:
 
 Out of scope:
 
+- Same-user shell/file access that forges consent, uncatchable termination
+  (SIGKILL or power loss), and automatic reclamation of abandoned ticket locks.
 - A compromised local account, Node.js or Python installation, or a malicious
   local model server. Anyone who can run commands as you can read your
   Keychain items through the same tools.

@@ -14,17 +14,21 @@ Add it to Claude Code, Factory or OpenCode, and your assistant gets three things
 | | |
 |---|---|
 | **Readiness check** | Say *"initiate online code mode"*. It checks this machine and answers `READY`, or names the one thing to fix first. |
-| **Nisi workflow** | One model drafts, checks and tests run, a second model reviews, and a short repair loop follows. You get proposed file contents and a report. It runs on your local models. |
+| **Nisi workflow** | One model drafts, syntax checks and text assertions run, a second model reviews, and a short repair loop follows. You get proposed file contents and a report. It runs on your local models; project tests are never executed. |
 | **Jev checks** | Optional advisory questions before and after a task (risk, missing detail, unbacked claims), answered by TypeSafe's Jev model. Nothing is sent until you consent. |
 
 Python standard library only, plus Node.js for Nisi. No telemetry.
 
 ## Quick start
 
-**1. Install**
+**1. Install this source checkout**
+
+The changes described here are unreleased. Run from the reviewed checkout; record
+its commit and local diff when reporting issues. The package version remains `0.1.0`
+until a release is assigned; it alone does not identify these changes.
 
 ```bash
-pipx install git+https://github.com/louiscalata/agiw-mcp
+pipx install .
 ```
 
 **2. Point it at your local model server.** You need an OpenAI-compatible server on
@@ -50,9 +54,9 @@ claude mcp add agiw-mcp -- agiw-mcp
 
 **4. Say "initiate online code mode".** The assistant runs the readiness check and
 tells you what, if anything, is missing.
-`READY` covers the full workflow, including Jev consent and a Jev key. A local-only
-setup reports Jev consent or the Jev key as the first missing item once the local
-prerequisites pass. `agiw_nisi_run` works without Jev.
+`READY` covers the local prerequisites. Optional Jev readiness is reported separately
+in `jev.status` (`READY` or `NOT_READY`) with its consent and key checks.
+`agiw_nisi_run` works without Jev; key lookup is skipped until consent is recorded.
 
 ## What it will and won't do
 
@@ -61,9 +65,12 @@ prerequisites pass. `agiw_nisi_run` works without Jev.
   runs generated code. You decide what to apply.
 - **Local models only.** The model server must be on `127.0.0.1` or `::1`.
   Hostnames, HTTPS and other addresses are refused.
-- **Jev is opt-in.** You grant consent yourself, in a terminal. Your assistant
-  cannot grant it for you. Jev's answers are advisory, not a verdict.
-- **One request at a time, on one machine.** No fleet, queue or background jobs.
+- **Jev is opt-in through MCP.** The MCP tool cannot grant consent. The CLI asks
+  for confirmation in a terminal, but any process with same-user shell or config
+  write access can change the consent record. This is not an OS user-presence
+  boundary. Jev's answers are advisory, not a verdict.
+- **One tool call at a time per server process.** During Nisi runs, ping and
+  cancellation remain responsive. Separate server processes can run concurrently.
 - **No telemetry.** The only per-call log is a Jev activity log of hashes, sizes
   and outcome codes, never your text. Other local state includes `config.json`,
   `consent.json`, the rotated `jev-activity.jsonl.1`, and ticket admission state.
@@ -74,13 +81,13 @@ prerequisites pass. `agiw_nisi_run` works without Jev.
 |---|---|
 | `agiw_readiness` | Checks prerequisites in order and returns `READY` or the first missing one with its fix. Starts nothing. |
 | `agiw_status` | Versions, configuration and which prerequisites are met. No secrets. |
-| `agiw_consent` | Shows exactly what Jev would receive, or revokes consent. Granting is terminal-only. |
-| `agiw_jev_pre` | Advisory Jev questions about a task before you start (task text up to 12 KB). |
-| `agiw_jev_post` | Advisory Jev questions about a result or report (truncated to 12 KB). |
+| `agiw_consent` | Shows exactly what Jev would receive, or revokes consent. The MCP tool cannot grant consent. |
+| `agiw_jev_pre` | Advisory Jev questions about a task before you start (task text up to 12 KiB). |
+| `agiw_jev_post` | Advisory Jev questions about a result or report (truncated to 12 KiB). |
 | `agiw_nisi_run` | One Nisi v0.2.0 workflow run on the file contents you supply, with your local models. |
 
-A typical task: `agiw_jev_pre` → `agiw_nisi_run` → you review the proposed files →
-`agiw_jev_post`.
+A local task: `agiw_nisi_run` → you review the proposed files. If you choose to
+configure Jev, add `agiw_jev_pre` before the run and `agiw_jev_post` after it.
 
 ## Setup details
 
@@ -88,6 +95,8 @@ A typical task: `agiw_jev_pre` → `agiw_nisi_run` → you review the proposed f
 <summary><b>Requirements and the local model server</b></summary>
 
 - Python 3.10 or newer.
+- macOS and Linux are covered by CI. Windows is experimental and not covered by CI;
+  ticket admission is disabled there.
 - Node.js 22 or newer on the `PATH` of the program that starts `agiw-mcp` (your MCP client).
 - A local OpenAI-compatible chat server that supports JSON-schema structured output
   (`response_format: {"type": "json_schema"}`), listening on
@@ -99,7 +108,7 @@ A typical task: `agiw_jev_pre` → `agiw_nisi_run` → you review the proposed f
 Try it without installing:
 
 ```bash
-uvx --from git+https://github.com/louiscalata/agiw-mcp agiw-mcp --version
+uvx --from . agiw-mcp --version
 ```
 
 </details>
@@ -112,6 +121,8 @@ uvx --from git+https://github.com/louiscalata/agiw-mcp agiw-mcp --version
 | macOS | `~/Library/Application Support/agiw-mcp` |
 | Linux | `$XDG_CONFIG_HOME/agiw-mcp` (default `~/.config/agiw-mcp`) |
 | Windows | `%APPDATA%\agiw-mcp` |
+
+`AGIW_MCP_CONFIG_DIR` overrides the config directory and must be an absolute path.
 
 All keys in `config.json` are optional; unknown keys are refused. Besides the three
 shown in the quick start: `keychain_service` (default `agiw-mcp`), `keychain_account`
@@ -241,12 +252,22 @@ If the client cannot find `agiw-mcp`, use the absolute path that
 <summary><b>Nisi run arguments and limits</b></summary>
 
 `agiw_nisi_run` takes `task` (required), `files` (a list of `{path, content}` with
-relative paths), `new_files` (paths the author may create), `acceptance_criteria`,
+relative paths using ASCII letters, digits, `._@+-` and `/`, with no empty, `.` or `..`
+parts, trailing-dot parts or Windows device names such as `nul.txt` and `aux.txt`),
+`new_files` (paths the author may create), `acceptance_criteria`,
 `assertions` (`{path, contains}` or `{path, not_contains}`), `repair_budget` (0 to 3,
 default 1), `timeout_seconds` (30 to 1800, default 600) and an optional `ticket`.
 
-A `ticket` is `{ticketId, claimState, writeScope, owner}`. Only `claimState` `Granted` or
-`Active` is admitted; `writeScope` is a list of scope keys or `/`-separated paths. Before
+Paths are at most 256 characters; each part is at most 128. A part starts with
+a letter, digit or `_@+-`, optionally preceded by one dot, and may then contain
+letters, digits or `._@+-`. The same rules apply to `new_files`.
+
+A `ticket` is `{ticketId, claimState, writeScope, owner}`, supplied by the caller for
+cooperative exclusion across processes sharing the registry. It is not independent
+authorization: the caller also chooses `claimState` and `owner`. Only `claimState`
+`Granted` or `Active` is admitted; `writeScope` is a list of `/`-separated path scopes.
+Every path in `files` and `new_files` must equal or lie below a scope, otherwise
+`TICKET_SCOPE_MISMATCH` is returned before admission. The lock record retains `owner`. Before
 Node is started or a temporary folder is created, the ticket is admitted all-or-nothing: it
 is refused (`TICKET_SCOPE_CONFLICT`) if any scope equals, contains or is contained in a scope
 of a ticket already admitted, by this or another agiw-mcp process. Scopes are compared
@@ -267,17 +288,30 @@ check the directory for reparse points, ownership and permissions. Runs without 
 still work on Windows unless `require_ticket` is `true`.
 Refusals name only the ticket id.
 
-Its static checks parse Python (`ast.parse`), JavaScript (`node --check`) and JSON;
-other file types get structural checks only, and the result says which files were
-parsed. Its tests are: at least one file changed, no proposed file is empty, and your
-assertions. Limits: `files` and `new_files` each allow up to 64 entries, with no
+Its static checks compile Python (`compile` without execution), parse JavaScript
+(`node --check`) and JSON; other file types get structural checks only, and the result says which files were
+checked. Python uses the interpreter running agiw-mcp; `pythonCheckerVersion`
+reports that version, so syntax for a newer Python may fail. Its tests are: at least
+one file changed, no proposed file is empty, and your assertions. Limits: `files` and `new_files` each allow up to 64 entries, with no
 combined cap. Supplied file contents are limited to 256 KiB per file and 512 KiB
 in total, measured as UTF-8 bytes. Proposed file contents have a separate 2 MiB
 total limit.
 
-Requests are handled one at a time: while a Nisi run is in progress (up to its
-timeout), other requests wait. Nisi's `COMPLETED` means the configured checks, tests
+Tool calls are serialized per process. During Nisi runs, ping and cancellation are
+handled while up to 16 other messages wait in the pending queue (with an additional
+bounded input queue). Cancelling the active request or closing stdin stops its
+runner and suppresses its reply. SIGTERM/SIGHUP also trigger cleanup. The runner
+limit is `timeout_seconds + 30`; process and stream cleanup can add further waits.
+Other tools still run synchronously. Nisi's `COMPLETED` means the configured checks, tests
 and review passed; it is not a guarantee of correctness.
+
+The result's `taskFingerprint` is Nisi's task-record hash, which excludes the supplied
+text and contents. `inputFingerprint` binds the host request's task, file contents,
+assertions, model/check options and Python version (excluding only the interpreter
+path). Each model receipt includes it. `requestSha256` hashes the final body passed
+to fetch; `adapterRequestSha256` preserves the original vendor hash before the host
+adds `reasoning_effort`. A null transport hash means fetch was not invoked, not
+proof that a provider received nothing.
 
 </details>
 

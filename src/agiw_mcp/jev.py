@@ -112,6 +112,10 @@ def analyse(phase: str, text, config: Config) -> dict:
         log("ENDPOINT_REFUSED")
         raise ToolError("JEV_ENDPOINT_REFUSED", "The Jev endpoint was refused by policy; nothing was sent.") from None
     except HttpFailure as failure:
+        if failure.kind == "busy":
+            log("BUSY")
+            raise ToolError("JEV_BUSY", "Local HTTP workers are busy; nothing was sent. "
+                            "Wait for an in-flight request to finish before trying again. Not retried.") from None
         if failure.kind == "http":
             log("HTTP_ERROR", failure.status)
             hint = {401: " The API key was rejected.", 403: " The API key is not allowed to use this model.",
@@ -125,7 +129,7 @@ def analyse(phase: str, text, config: Config) -> dict:
             log("BAD_RESPONSE", failure.status)
             raise ToolError("JEV_BAD_RESPONSE", "TypeSafe's response was not a valid Jev answer.") from None
         log("UNREACHABLE")
-        raise ToolError("JEV_UNREACHABLE", "TypeSafe could not be reached (connection error or timeout). "
+        raise ToolError("JEV_UNREACHABLE", "The TypeSafe exchange failed or timed out. The request may have been sent. "
                         "Not retried.") from None
     finally:
         key = None  # noqa: F841 - drop the reference as early as possible

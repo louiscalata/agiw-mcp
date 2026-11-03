@@ -268,7 +268,7 @@ class NisiEndToEndTests(IsolatedTestCase):
 
     @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_child_env_is_exactly_the_documented_set(self):
-        # Grok's delta review: nothing pinned the runner environment, so a key could have leaked into it.
+        # Boundary review: nothing pinned the runner environment, so a key could have leaked into it.
         for name in ("TYPESAFE_API_KEY", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "SYSTEMROOT", "WINDIR"):
             os.environ[name] = "secret-value-123"
         env = nisi._child_env("/opt/node/bin/node", "/tmp/work")
@@ -276,7 +276,8 @@ class NisiEndToEndTests(IsolatedTestCase):
         if os.name == "nt":
             expected |= {"SYSTEMROOT", "WINDIR"}
         self.assertEqual(set(env), expected)
-        self.assertNotIn("secret-value-123", {value for key, value in env.items() if key not in ("SYSTEMROOT", "WINDIR")})
+        self.assertNotIn("secret-value-123",
+                         {value for key, value in env.items() if key not in ("SYSTEMROOT", "WINDIR")})
         self.assertEqual((env["HOME"], env["TMPDIR"], env["TMP"], env["TEMP"]), ("/tmp/work",) * 4)
         self.assertEqual((env["LANG"], env["NODE_NO_WARNINGS"]), ("C.UTF-8", "1"))
 

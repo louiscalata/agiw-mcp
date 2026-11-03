@@ -10,7 +10,9 @@ Human commands (never used by MCP clients):
 from __future__ import annotations
 
 import json
+import signal
 import sys
+import threading
 
 from . import __version__
 
@@ -41,7 +43,11 @@ def _consent_cli(action: str) -> int:
         print()
         print("To allow agiw-mcp to send the items above to TypeSafe, type the two words")
         print('"I agree" (without the quotes) and press Return. Anything else records nothing.')
-        answer = input("> ")
+        try:
+            answer = input("> ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nConsent was not recorded.")
+            return 1
         # Accept the phrase with any case, surrounding quotes or a final full stop; nothing else.
         if answer.strip().strip("'\"").rstrip(".").strip().casefold() != "i agree":
             print('Consent was not recorded. Run the command again and type only the two words "I agree".')
@@ -60,10 +66,30 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     if not args:
         from .rpc import serve
+
+        class Shutdown(BaseException):
+            pass
+
+        def shutdown(signum, _frame):
+            # Unwind the run's finally blocks before exiting. Repeated signals must not interrupt cleanup.
+            for name in previous:
+                signal.signal(name, signal.SIG_IGN)
+            raise Shutdown(signum)
+
+        previous = {}
+        if threading.current_thread() is threading.main_thread():
+            for name in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):
+                if name is not None:
+                    previous[name] = signal.signal(name, shutdown)
         try:
             return serve()
+        except Shutdown as exc:
+            return 128 + exc.args[0]
         except KeyboardInterrupt:
             return 0
+        finally:
+            for name, handler in previous.items():
+                signal.signal(name, handler)
     if args == ["--version"]:
         print(f"agiw-mcp {__version__}")
         return 0

@@ -27,7 +27,8 @@ _TICKET = {"type": "object", "properties": {
     "owner": {"type": "string", "maxLength": tickets.MAX_OWNER_CHARS}},
     "required": ["ticketId", "claimState", "writeScope", "owner"], "additionalProperties": False,
     "description": ("Optional claim ticket (required when config require_ticket is true). Admitted before the "
-                    "run starts, refused if its write scope overlaps an admitted ticket, released afterwards.")}
+                    "run starts; every proposed path must be within writeScope. Cooperative exclusion, not independent "
+                    "authorization. Refused on overlap with an admitted ticket; released afterwards.")}
 
 TOOLS = [
     {
@@ -36,7 +37,9 @@ TOOLS = [
         "description": ("The \"initiate online code mode\" check. Only checks, never starts work. Returns READY, or "
                         "the FIRST missing prerequisite with an exact fix, in this order: Python, configuration, "
                         "Node.js 22+, vendored Nisi hashes, local OpenAI-compatible model server listing two "
-                        "distinct configured models, consent recorded, TypeSafe API key present (macOS: presence checked without reading it; Linux: `secret-tool lookup` returns it but agiw-mcp discards it)."),
+                        "distinct configured models. Optional Jev readiness is reported separately; key presence "
+                        "is checked "
+                        "only after consent (Linux lookup returns the key but discards its output)."),
         "inputSchema": _EMPTY,
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
@@ -52,8 +55,8 @@ TOOLS = [
         "name": "agiw_consent",
         "title": "Consent for Jev (TypeSafe)",
         "description": ("Show or revoke consent to send text to TypeSafe for the Jev checks. \"show\" returns "
-                        "exactly what is sent. Consent cannot be granted through this tool: only the user can "
-                        "grant it, by running `agiw-mcp consent grant` in a terminal."),
+                        "exactly what is sent. This tool cannot grant consent. Use `agiw-mcp consent grant` in a "
+                        "terminal; same-user shell or file access can also change the consent record."),
         "inputSchema": {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["show", "revoke"]}},
             "required": ["action"], "additionalProperties": False},
@@ -62,11 +65,12 @@ TOOLS = [
     {
         "name": "agiw_jev_pre",
         "title": "Jev pre-analysis (advisory)",
-        "description": ("Send a task description (at most 12 KB) to Jev at TypeSafe with fixed questions about risk, "
+        "description": ("Send a task description (at most 12 KiB) to Jev at TypeSafe with fixed questions about risk, "
                         "blockers, missing detail, irreversible actions and reliance on old reports. Returns Jev's "
                         "answers and which are flagged. Advisory, not a verdict. Refused unless consent is recorded "
                         "and a key is available. Never retried automatically."),
-        "inputSchema": {"type": "object", "properties": {"task": {"type": "string", "maxLength": 12288}},
+        "inputSchema": {"type": "object", "properties": {"task": {"type": "string", "maxLength": 12288,
+            "description": "At most 12288 UTF-8 bytes; non-ASCII characters may use multiple bytes."}},
                         "required": ["task"], "additionalProperties": False},
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False,
                         "openWorldHint": True},
@@ -74,7 +78,7 @@ TOOLS = [
     {
         "name": "agiw_jev_post",
         "title": "Jev post-analysis (advisory)",
-        "description": ("Send a result or report (truncated to 12 KB) to Jev at TypeSafe with fixed questions about "
+        "description": ("Send a result or report (truncated to 12 KiB) to Jev at TypeSafe with fixed questions about "
                         "self-contradiction, unbacked claims, risk of acting on it and misclassified findings. "
                         "Advisory, not a verdict. Refused unless consent is recorded and a key is available. Never "
                         "retried automatically."),
@@ -107,7 +111,7 @@ TOOLS = [
                                 "default": nisi.DEFAULT_TIMEOUT_SECONDS},
             "ticket": _TICKET},
             "required": ["task"], "additionalProperties": False},
-        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
 ]
 TOOL_NAMES = frozenset(tool["name"] for tool in TOOLS)
@@ -141,8 +145,11 @@ def status_tool(args: dict) -> dict:
     try:
         config_info = load_config().public()
         config_error = None
+        config_directory = display_path(config_dir())
+        config_path = display_path(config_file_path())
     except ConfigError as exc:
         config_info, config_error = None, exc.message
+        config_directory = config_path = None
     node_path, node_version = nisi.find_node()
     try:
         nisi_info = nisi.verify_vendor()
@@ -157,8 +164,8 @@ def status_tool(args: dict) -> dict:
         "node": {"path": display_path(node_path) if node_path else None,
                  "version": ".".join(map(str, node_version)) if node_version else None},
         "nisi": nisi_info,
-        "configDir": display_path(config_dir()),
-        "configFile": display_path(config_file_path()),
+        "configDir": config_directory,
+        "configFile": config_path,
         "config": config_info,
         "configError": config_error,
         "jevEndpoint": consent.JEV_ENDPOINT,

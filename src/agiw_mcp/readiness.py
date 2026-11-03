@@ -2,10 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Readiness for "initiate online code mode": check only, never start work.
 
-Checks run in a fixed order and stop at the first missing prerequisite, which
-is returned with an exact fix. Every probe is bounded (3 s or less) and every
-exception is contained; nothing here reads the API key's value or contacts
-TypeSafe.
+Local checks run in a fixed order and stop at the first missing prerequisite.
+Optional Jev checks follow; key presence is checked only after consent. On Linux
+the key lookup discards its output. Nothing here contacts TypeSafe.
 """
 from __future__ import annotations
 
@@ -37,7 +36,7 @@ def check_config() -> tuple[dict, Config | None]:
         config = load_config()
     except ConfigError as exc:
         return _check("config", False, exc.message,
-                      f"Fix or remove {display_path(config_file_path())}; see "
+                      "Fix AGIW_MCP_CONFIG_DIR or config.json; see "
                       "'Configuration file and environment variables' in the README's Setup details."), None
     return _check("config", True, f"Configuration from {config.source}"), config
 
@@ -119,9 +118,12 @@ def _list_models(endpoint: str, url_key: str):
         return None, _check("models", False, "The model endpoint URL was refused by policy",
                             f"Use a loopback {url_key} such as http://127.0.0.1:1234/v1.")
     except HttpFailure as failure:
+        if failure.kind == "busy":
+            return None, _check("models", False, "Local HTTP workers are busy; nothing was sent.",
+                                "Wait for an in-flight request to finish, then check readiness again.")
         detail = {"http": f"{endpoint} returned HTTP {failure.status}",
                   "invalid_json": f"{endpoint} did not return JSON",
-                  "too_large": f"{endpoint} returned more than 1 MB",
+                  "too_large": f"{endpoint} returned more than 1 MiB",
                   "redirect": f"{endpoint} redirected"}.get(
             failure.kind, f"{endpoint} was not reachable within {PROBE_TIMEOUT:g} s")
         return None, _check("models", False, detail,
@@ -138,7 +140,7 @@ def check_key(config: Config) -> dict:
     except Exception:  # noqa: BLE001 - a probe must never raise
         presence = {"present": False, "source": None}
     if presence["present"]:
-        return _check("jev_key", True, f"TypeSafe API key present ({presence['source']}); value not read")
+        return _check("jev_key", True, f"TypeSafe API key present ({presence['source']}); value not shown")
     if sys.platform == "darwin":
         fix = (f"Run `security add-generic-password -s {config.keychain_service} -a {config.keychain_account} -w` "
                "and type the key at the prompt, or set TYPESAFE_API_KEY in the MCP client's environment.")
@@ -180,7 +182,7 @@ def evaluate(stop_at_first: bool = True) -> dict:
         return check_key(holder.get("config") or Config())
 
     steps = [("python", check_python), ("config", config_step), ("node", check_node), ("nisi", check_nisi),
-             ("models", models_step), ("consent", check_consent), ("jev_key", key_step)]
+             ("models", models_step)]
     for name, step in steps:
         try:
             row = step()
@@ -192,10 +194,20 @@ def evaluate(stop_at_first: bool = True) -> dict:
     failed = [row for row in checks if not row["ok"]]
     ready = not failed and len(checks) == len(steps)
     result = {"status": "READY" if ready else "NOT_READY", "checks": checks}
+    jev_checks = []
+    if ready or not stop_at_first:
+        for name, step in (("consent", check_consent), ("jev_key", key_step)):
+            try:
+                jev_checks.append(step())
+            except Exception:
+                jev_checks.append(_check(name, False, "Optional Jev check failed", "Check agiw_status."))
+    result["jev"] = {"status": "READY" if jev_checks and all(row["ok"] for row in jev_checks)
+                     else "NOT_READY", "checks": jev_checks}
+    result["checks"].extend(jev_checks)
     if failed:
         first = failed[0]
         result["missing"] = {"id": first["id"], "detail": first["detail"], "fix": first["fix"]}
-    result["next"] = ("Ready. Give a task: run agiw_jev_pre on it, then agiw_nisi_run with the relevant file "
-                      "contents, then agiw_jev_post on the result." if ready else
+    result["next"] = ("Ready for local Nisi work. Give a task and relevant file contents to agiw_nisi_run. "
+                      "Jev pre/post checks are optional and require consent and a key." if ready else
                       "Fix the missing prerequisite, then run agiw_readiness again. No work was started.")
     return result

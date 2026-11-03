@@ -5,10 +5,11 @@
 // agiw-mcp copies this file and the hash-verified Nisi package into a private
 // temporary directory and starts it there with Node's permission model. It reads
 // one JSON request on stdin and writes one JSON result on stdout. Candidate code
-// is parsed by fixed checkers (node --check, Python's ast.parse, JSON.parse) and
+// is parsed by fixed checkers (node --check, Python's compile, JSON.parse) and
 // is never executed. The only network destinations are the configured loopback
 // chat endpoints (author, and the reviewer's if it differs), enforced by Nisi's
 // local-chat adapter.
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runWorkflow } from './nisi/package/workflow/engine.mjs';
@@ -21,10 +22,10 @@ const WORK_DIR = fileURLToPath(new URL('.', import.meta.url));
 // The checker child gets this process's sandbox explicitly: Node versions differ in what they pass on.
 const CHILD_SANDBOX = process.execArgv.filter(arg => /^--(?:experimental-permission|permission|allow-fs-read=|allow-fs-write=)/u.test(arg));
 const PYTHON_CHECK = [
-  'import ast, sys',
+  'import sys',
   'source = sys.stdin.buffer.read()',
   'try:',
-  '    ast.parse(source)',
+  '    compile(source, "<candidate>", "exec")',
   'except SyntaxError as error:',
   '    sys.stdout.write("%s (line %s)" % (error.msg, error.lineno))',
   '    sys.exit(1)',
@@ -100,15 +101,17 @@ function syntaxCheck(path, content, request) {
 
 // Adds reasoning_effort when configured and refuses reasoning-only answers without promoting hidden
 // reasoning to content. Inspect the same capped stream Nisi reads; do not clone or eagerly buffer it.
-// Nisi's receipts hash the body it built; the run result reports the added field separately.
-function withReasoningEffort(effort, onReasoningOnly) {
+// Preserve Nisi's adapter hash and report the hash of the final body passed to fetch.
+function withReasoningEffort(effort, onReasoningOnly, wireHashes) {
   const configured = effort !== null && effort !== undefined;
   if (configured && !['none', 'low', 'medium', 'high'].includes(effort)) fail('REQUEST_INVALID');
   return async (url, init) => {
+    const adapterHash = sha256(init.body);
     if (configured) {
       const body = JSON.parse(init.body);
       init = { ...init, body: JSON.stringify({ ...body, reasoning_effort: effort }) };
     }
+    wireHashes.set(adapterHash, sha256(init.body));
     const response = await globalThis.fetch(url, init);
     if (!response.ok || !response.body?.getReader) return response;
     const chunks = [];
@@ -138,16 +141,16 @@ function withReasoningEffort(effort, onReasoningOnly) {
   };
 }
 
-function buildAdapters(request, onReasoningOnly) {
+function buildAdapters(request, onReasoningOnly, wireHashes) {
   const base = { destination: 'LOOPBACK_HTTP', endpoint: request.endpoint, timeoutMs: request.deadlineMs,
     maxOutputTokens: request.maxOutputTokens, maxRequestBytes: 8 * 1024 * 1024, maxResponseBytes: MAX_RESPONSE_BYTES };
   const innerAuthor = createLocalChatAuthorAdapter({ ...base, model: request.authorModel, id: 'agiw.author',
-    fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('author')) });
+    fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('author'), wireHashes) });
   // reviewerEndpoint lets the reviewer use a separate loopback server; it falls back to the author's endpoint.
   const reviewerEndpoint = typeof request.reviewerEndpoint === 'string' && request.reviewerEndpoint
     ? request.reviewerEndpoint : request.endpoint;
   const reviewer = createLocalChatReviewerAdapter({ ...base, endpoint: reviewerEndpoint, model: request.reviewerModel, id: 'agiw.reviewer',
-    fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('reviewer')) });
+    fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('reviewer'), wireHashes) });
   // Nisi's task record has a fixed schema, so the request text and current file
   // contents travel to the models as extra fields on the prompt's task object.
   const context = Object.freeze({ request: request.taskText, currentFiles: request.files });
@@ -161,14 +164,23 @@ function buildAdapters(request, onReasoningOnly) {
   return { author, innerAuthor, reviewer, reviewerWithContext };
 }
 
+const sha256 = value => createHash('sha256').update(value).digest('hex');
+
 async function main() {
   const request = await readRequest();
+  // Exclude only the local interpreter path; all model/check inputs and options remain bound.
+  const { python: _python, ...inputs } = request;
+  const inputFingerprint = sha256(JSON.stringify(inputs));
+  const wireHashes = new Map();
+  const receipts = adapter => adapter.receipts().map(receipt => ({ ...receipt,
+    adapterRequestSha256: receipt.requestSha256,
+    requestSha256: wireHashes.get(receipt.requestSha256) ?? null, inputFingerprint }));
   const original = new Map(request.files.map(file => [file.path, file.content]));
   const syntaxByCandidate = {};
   let reasoningOnlyRole = null;
   const { author, innerAuthor, reviewer, reviewerWithContext } = buildAdapters(request, role => {
     reasoningOnlyRole ??= role;
-  });
+  }, wireHashes);
   const task = {
     taskId: 'agiw-mcp.run', mode: 'edit', language: request.language, allowedFiles: request.allowedFiles,
     protectedFiles: [], protectedSnapshots: {}, acceptanceCriteria: request.acceptanceCriteria,
@@ -236,7 +248,8 @@ async function main() {
   const output = {
     kind: 'agiw-mcp.nisi-run.v1',
     report,
-    receipts: { author: innerAuthor.receipts(), reviewer: reviewer.receipts() },
+    inputFingerprint,
+    receipts: { author: receipts(innerAuthor), reviewer: receipts(reviewer) },
     syntax: syntaxByCandidate[report.candidateFingerprint] ?? {},
   };
   process.stdout.write(JSON.stringify(output));

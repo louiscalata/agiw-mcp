@@ -34,8 +34,8 @@ removes the files this call created. Locks left behind by a crashed process
 are not cleaned up: they refuse later admissions with a clear error until
 removed.
 
-On Windows admission is refused (TICKET_UNSUPPORTED_PLATFORM) before anything
-is validated or the filesystem is touched: there is no reparse-point,
+On Windows admission is refused (TICKET_UNSUPPORTED_PLATFORM) before the filesystem
+is touched: there is no reparse-point,
 ownership or permission check on the state directory yet, so it cannot be
 trusted.
 
@@ -441,7 +441,7 @@ class Registry:
                                     "that is already admitted; nothing was admitted.", ticketId=ticket_id)
             for key in clean["writeScope"]:
                 name = _scope_name(key)
-                data = json.dumps({"scope": key, "ticketId": ticket_id}).encode("utf-8")
+                data = json.dumps({"scope": key, "ticketId": ticket_id, "owner": clean["owner"]}).encode("utf-8")
                 try:
                     _create_exclusive(self.root, dir_fd, name, data)
                 except FileExistsError:
