@@ -17,8 +17,9 @@ Canonical roadmap for this checkout. Base revision: `417db82`.
 ## Deliberate follow-ups
 
 - Remote PR metadata/privacy remediation is outside this checkout and task scope.
-- Stale ticket locks after SIGKILL/power loss remain fail-closed; automatic reclamation
-  needs a separately reviewed ownership and process-identity design.
+- [x] Add conservative stale ticket lock recovery after SIGKILL/power loss, with process-owner
+  metadata, a 60-second age floor, local machine identity and PID checks, inode-serialized
+  reclamation and redacted recovery receipts. Legacy or unverifiable records remain fail-closed.
 - Optional Python target-interpreter selection and progress notifications are not added.
 - Moving private scrub definitions to private configuration requires a replacement
   policy and CI configuration; the existing checks are preserved.
@@ -53,3 +54,19 @@ and manifest remain unchanged.
 
 No commit or push was made. The earlier 217-test evidence above describes the prior
 remediation run; this section records the subsequent Grok follow-up.
+
+## Stale-lock recovery
+
+- [x] Add same-host process-owner metadata to admission and scope locks, 60-second age checks,
+  conservative PID/start-identity probes, atomic reclamation between cooperating reclaimers
+  and redacted recovery log lines.
+- [x] Add 17 recovery tests, including actual SIGKILL and competing-process admission,
+  foreign/legacy/live-lock retention and replacement-inode protection. All 17 pass.
+- [x] Run the requested full suite: 243 tests, 199 passed, 44 loopback-bind PermissionError
+  errors imposed by the sandbox; zero assertion failures. These errors are blocked tests.
+- [x] Run Ruff and git diff --check: passed. Write `.pr/stale-lock-recovery.md` with exact output.
+- [ ] Run the full suite with loopback listening permitted and validate on native Linux.
+
+Final local output is `/private/tmp/stale-full-tests.log`; the focused log is
+`/private/tmp/stale-focused.log`. No commit or push. External review was unavailable: Claude
+CLI was logged out, and the fallback worker status tool required unavailable approval.

@@ -117,7 +117,8 @@ class RegistryTests(IsolatedTestCase):
         return sorted(root.glob("scope-*.lock")) if root.exists() else []
 
     def records(self, root=None):
-        return sorted((json.loads(p.read_text()) for p in self.scope_files(root)), key=lambda r: r["scope"])
+        return sorted(({k: v for k, v in json.loads(p.read_text()).items() if k != "processOwner"}
+                       for p in self.scope_files(root)), key=lambda r: r["scope"])
 
     def test_refused_ticket_creates_nothing(self):
         for bad in (ticket(state="Requested"), ticket(scope=()), None, ticket(scope=("ok", "\ud800"))):

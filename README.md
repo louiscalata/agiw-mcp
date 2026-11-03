@@ -280,8 +280,24 @@ Admission state lives in `tickets/` under the config directory, or in `AGIW_MCP_
 by you with mode `0700` (a looser mode is tightened if possible), and every directory above
 it, including through symlinks, must be owned by you or root and not writable by group or
 others unless sticky (like `/tmp`); otherwise admission is refused (`TICKET_REGISTRY_UNSAFE`).
-A run's locks are released only from the directory they were created in. Locks left by a
-crashed process are not cleaned up automatically; they refuse later admissions until removed.
+A run's locks are released only from the directory they were created in. Admission and scope
+locks record a machine identity, PID, optional process start identity and creation time.
+After SIGKILL or power loss, a later admission automatically reclaims a lock only when both
+its creation time and file modification time are at least 60 seconds old, its machine identity
+matches this host (and Linux PID namespace), and a PID liveness check confirms `ESRCH` (no process).
+Recorded start identities are checked when present. A live PID is always kept, even if its start
+identity differs; permission errors and uncertain liveness also keep the lock. Recovery uses an
+inode-level advisory lock and verifies that the pathname still names that inode before unlinking,
+so competing reclaimers cannot remove a replacement lock. The kernel releases that advisory lock
+on process exit; recovery creates no extra lock file that could itself be stranded.
+Each successful removal emits `TICKET_LOCK_RECLAIMED kind=admission|scope pid=...`
+with a reason and age through Python logging (stderr by default), without owner text or scope paths.
+Foreign-host locks, legacy locks without process-owner metadata, malformed/partial records and
+locks whose machine identity cannot be verified remain fail-closed. These require manual cleanup
+only after independently confirming that no runs are active. Recovery requires POSIX descriptor
+operations and `flock`; do not share registries between cloned machines with identical machine IDs
+or use filesystems without reliable advisory locking. Machine identity comes from Darwin
+`gethostuuid` or Linux `/etc/machine-id`; hostname alone is never trusted.
 On Windows, ticket admission is disabled for now: any ticket is refused
 (`TICKET_UNSUPPORTED_PLATFORM`) before the state directory is touched, until agiw-mcp can
 check the directory for reparse points, ownership and permissions. Runs without a ticket
