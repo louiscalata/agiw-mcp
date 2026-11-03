@@ -3,9 +3,11 @@
 Every file in this repository was written for AGIW MCP, except the files listed
 below. Those were copied byte-for-byte from the public AGIW Suite repository
 (https://github.com/louiscalata/agiw-suite), branch `edition-parity`, at commit
-`5d52621` (full hash `5d526216d2aaab1f0db1d4f2a9a9f06592cbb096`, 2026-10-19).
-Each is licensed under Apache-2.0 (SPDX: `Apache-2.0`) by the same copyright
-holder, Louis Calata.
+`5d52621` (2026-10-19). That branch is no longer published. The same files are
+byte-identical in AGIW Suite's `v1.0.0` tag (commit
+`8bb7de71491e23c4d1409a807549fbb5b2c15b1e`) and on its `main` branch, so you can
+check them there. Each is licensed under Apache-2.0 (SPDX: `Apache-2.0`) by the
+same copyright holder, Louis Calata.
 
 The vendored Nisi files are themselves the public Nisi v0.2.0 release
 (https://github.com/louiscalata/nisi/releases/tag/v0.2.0, source commit
@@ -14,7 +16,7 @@ The vendored Nisi files are themselves the public Nisi v0.2.0 release
 manifest (`d7cd9f31365ad47f01ccfbfaf2cf29923830abf642c60518cbeb1b9776d8cd23`)
 and of every listed file before each run.
 
-| File in this repository | Source path in agiw-suite @ 5d52621 | SPDX | SHA-256 |
+| File in this repository | Source path in agiw-suite (`v1.0.0`) | SPDX | SHA-256 |
 |---|---|---|---|
 | `LICENSE` | `LICENSE` | Apache-2.0 | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
 | `src/agiw_mcp/vendor/nisi/manifest.json` | `vendor/nisi/manifest.json` | Apache-2.0 | `d7cd9f31365ad47f01ccfbfaf2cf29923830abf642c60518cbeb1b9776d8cd23` |

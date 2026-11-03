@@ -50,6 +50,9 @@ claude mcp add agiw-mcp -- agiw-mcp
 
 **4. Say "initiate online code mode".** The assistant runs the readiness check and
 tells you what, if anything, is missing.
+`READY` covers the full workflow, including Jev consent and a Jev key. A local-only
+setup reports Jev consent or the Jev key as the first missing item once the local
+prerequisites pass. `agiw_nisi_run` works without Jev.
 
 ## What it will and won't do
 
@@ -61,8 +64,9 @@ tells you what, if anything, is missing.
 - **Jev is opt-in.** You grant consent yourself, in a terminal. Your assistant
   cannot grant it for you. Jev's answers are advisory, not a verdict.
 - **One request at a time, on one machine.** No fleet, queue or background jobs.
-- **No telemetry.** The only local record is a Jev activity log of hashes, sizes
-  and outcome codes, never your text.
+- **No telemetry.** The only per-call log is a Jev activity log of hashes, sizes
+  and outcome codes, never your text. Other local state includes `config.json`,
+  `consent.json`, the rotated `jev-activity.jsonl.1`, and ticket admission state.
 
 ## Tools
 
@@ -122,12 +126,12 @@ otherwise spend their tokens on hidden reasoning and return empty answers.
 
 The model settings can come from the environment instead:
 `AGIW_MCP_BASE_URL` (or the legacy `AGIW_MCP_MODEL_BASE_URL`, used only when
-`AGIW_MCP_BASE_URL` is unset), `AGIW_MCP_AUTHOR_MODEL`, `AGIW_MCP_REVIEWER_MODEL`,
+`AGIW_MCP_BASE_URL` is unset or empty), `AGIW_MCP_AUTHOR_MODEL`, `AGIW_MCP_REVIEWER_MODEL`,
 `AGIW_MCP_REASONING_EFFORT`.
 
 | Config key | Environment variable | Precedence and validation |
 |---|---|---|
-| `model_base_url` | `AGIW_MCP_BASE_URL` | `AGIW_MCP_BASE_URL`, then legacy `AGIW_MCP_MODEL_BASE_URL`, then the config file, then `http://127.0.0.1:1234/v1`. Only HTTP loopback literals (`127.0.0.1` or `[::1]`) are accepted; for a server on port 1235, use `http://127.0.0.1:1235/v1`. |
+| `model_base_url` | `AGIW_MCP_BASE_URL` | `AGIW_MCP_BASE_URL`, then legacy `AGIW_MCP_MODEL_BASE_URL` when `AGIW_MCP_BASE_URL` is unset or empty, then the config file, then `http://127.0.0.1:1234/v1`. Only HTTP loopback literals (`127.0.0.1` or `[::1]`) are accepted; for a server on port 1235, use `http://127.0.0.1:1235/v1`. |
 | `reviewer_base_url` | `AGIW_MCP_REVIEWER_BASE_URL` | Optional. `AGIW_MCP_REVIEWER_BASE_URL`, then the config file, then unset, which means the reviewer uses `model_base_url`. Set it to send the reviewer's requests to a different local server, for example `http://127.0.0.1:1245/v1`. Same loopback-only rule as `model_base_url`. |
 
 Check your setup at any time:
@@ -266,7 +270,10 @@ Refusals name only the ticket id.
 Its static checks parse Python (`ast.parse`), JavaScript (`node --check`) and JSON;
 other file types get structural checks only, and the result says which files were
 parsed. Its tests are: at least one file changed, no proposed file is empty, and your
-assertions. Limits: 64 files, 256 KB per file, 512 KB in total.
+assertions. Limits: `files` and `new_files` each allow up to 64 entries, with no
+combined cap. Supplied file contents are limited to 256 KiB per file and 512 KiB
+in total, measured as UTF-8 bytes. Proposed file contents have a separate 2 MiB
+total limit.
 
 Requests are handled one at a time: while a Nisi run is in progress (up to its
 timeout), other requests wait. Nisi's `COMPLETED` means the configured checks, tests

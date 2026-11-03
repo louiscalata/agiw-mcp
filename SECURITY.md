@@ -10,7 +10,7 @@ public issue. Include the version and the steps to reproduce.
 
 | Tool | Network destination | What is sent |
 |---|---|---|
-| `agiw_readiness`, `agiw_status` | your loopback model server only (`GET /models`, 3 s limit) | nothing but the request line and headers |
+| `agiw_readiness`, `agiw_status` | your loopback model server only (`GET /models`; agiw-mcp waits up to 3 s per request, but the worker thread and socket may outlive that wait) | nothing but the request line and headers |
 | `agiw_consent` | none | nothing |
 | `agiw_nisi_run` | your loopback model server only | the task text, the file contents you supplied, Nisi's prompts |
 | `agiw_jev_pre`, `agiw_jev_post` | `https://api.typesafe.ai/v1/systemone` | your text (pre: at most 12 KB; post: truncated to 12 KB), the fixed questions, the Jev model name, and your API key in the `Authorization` header |
@@ -26,16 +26,19 @@ There is no telemetry and no update check.
 
 - Enforced by the server. `agiw_jev_pre` and `agiw_jev_post` refuse with
   `CONSENT_REQUIRED` before looking up the key or opening a connection unless
-  consent is recorded. Readiness and status also skip the key presence lookup
-  until consent is recorded, including when reporting all readiness checks.
+  consent is recorded. Readiness and status also skip the Keychain and Secret
+  Service lookups until consent is recorded, including when reporting all
+  readiness checks. Status always reports whether `TYPESAFE_API_KEY` is set,
+  never its value.
 - Consent is bound to the SHA-256 of the disclosure text. A changed disclosure
   invalidates earlier consent.
 - Only the user can grant consent, by running `agiw-mcp consent grant` in an
   interactive terminal and typing the confirmation. The `agiw_consent` tool
   can show the disclosure and revoke consent, but it refuses to grant it, so
   an assistant cannot consent on the user's behalf.
-- Consent is stored in `consent.json` in the config directory, mode 0600 in a
-  0700 directory on macOS and Linux.
+- Consent is stored in `consent.json` in the config directory. On macOS and
+  Linux, each write replaces it with a new file set to mode 0600. Setting the
+  directory to mode 0700 is best effort.
 
 ## The API key
 
@@ -59,12 +62,15 @@ There is no telemetry and no update check.
   or write project files.
 - Each run gets a fresh private temporary directory (mode 0700). The vendored
   Nisi files are copied into it and every copied byte is checked against the
-  pinned manifest (itself pinned by SHA-256) before Node starts. The
-  directory is removed afterwards, also on failure and timeout. The test suite
-  verifies that nothing outside it changes.
+  pinned manifest (itself pinned by SHA-256) before Node starts. agiw-mcp
+  attempts to remove the directory afterwards, also on failure and timeout;
+  removal errors are ignored. The test suite checks selected project, home
+  and config directories for changes.
 - Node's version and permission probes (`node --version` and `node --help`)
-  run with only the inherited `PATH`, `LANG=C.UTF-8` and `NODE_NO_WARNINGS=1`;
-  keys, proxy settings and other environment variables are not passed to them.
+  run with the inherited `PATH`, `LANG=C.UTF-8` and `NODE_NO_WARNINGS=1`.
+  On Windows, `SystemRoot`, `SYSTEMDRIVE` and `WINDIR` are also passed when
+  nonempty, with names matched case-insensitively. Keys, proxy settings and
+  other environment variables are not passed to them.
   A failed permission probe (exception or nonzero exit) refuses the run with
   `NODE_UNAVAILABLE`; that failed result is not cached.
 - If Node's help lists `--permission` or `--experimental-permission`, the
@@ -81,8 +87,8 @@ There is no telemetry and no update check.
   (all pointing to the temporary directory), `LANG` (`C.UTF-8`) and
   `NODE_NO_WARNINGS` (`1`). On Windows, `SYSTEMROOT` and `WINDIR` are also
   set to their parent values when present. The runner also has a
-  wall-clock limit and capped output. The process group is killed on
-  timeout.
+  wall-clock limit and capped output. On timeout, agiw-mcp kills the process
+  group on POSIX and only the runner process on Windows.
 - Generated code is never executed. Static checks only parse it: `node --check`
   for JavaScript, Python's `ast.parse` in an isolated interpreter (`-I -S -B`),
   and `JSON.parse`. These checker processes are started by the runner, which is
@@ -115,7 +121,9 @@ Out of scope:
 
 ## Local records
 
-`jev-activity.jsonl` in the config directory (mode 0600) records, per Jev call:
+`jev-activity.jsonl` in the config directory records, per Jev call:
 time, tool, SHA-256 and byte count of your text, whether it was truncated, the
 outcome code, HTTP status and number of flags. It never contains the text or
-the key. Nisi runs leave no record.
+the key. New logs are created with mode 0600 on macOS and Linux; an existing
+log keeps its mode. Nisi runs have no per-call log; ticket admission state is
+stored separately.
