@@ -7,5 +7,14 @@ dist/
 *.egg-info/
 .ruff_cache/
 .pytest_cache/
+.mypy_cache/
+node_modules/
+.env
+.env.*
 .DS_Store
 .claude/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+*.swp
