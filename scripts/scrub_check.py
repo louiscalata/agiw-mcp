@@ -12,6 +12,7 @@ path:line and rule name; the matched text itself is never printed.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -27,7 +28,6 @@ RULES = [
     ("private-home-macos", re.compile(r"/Users/louiscalata")),
     ("private-home-linux", re.compile(r"/home/louiscalata")),
     ("private-user-at", re.compile(r"louiscalata@")),
-    ("private-host", re.compile(r"louisaurorar12", re.IGNORECASE)),
     ("rfc1918-10", re.compile(r"(?<![\d.])10\.\d{1,3}\.\d{1,3}\.\d{1,3}(?![\d.])")),
     ("rfc1918-172", re.compile(r"(?<![\d.])172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(?![\d.])")),
     ("rfc1918-192", re.compile(r"(?<![\d.])192\.168\.\d{1,3}\.\d{1,3}(?![\d.])")),
@@ -38,6 +38,14 @@ RULES = [
     ("bearer-token", re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]{20,}")),
     ("pem-private-key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
 ]
+# Private machine names are listed by the SHA-256 of their lowercase form, so this file does not
+# spell them out. A whole host-name token (letters, digits, hyphens) matches in any case.
+PRIVATE_HOST_SHA256 = frozenset({
+    "c343f22db1ccf3c7378465e406621b270a02f17eab045863b23c1b592d8edeb3",
+    "2b94b5d80b5bc4a12b6058ced1bb434a02e026a4cbead6a28b310d2dca1508fb",
+    "b38ebe1a739174bcdd0095c2b59fcb0d61506cb9e8731bc953e30bce3dc99586",
+})
+HOST_TOKEN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*", re.IGNORECASE)
 # scrub-patterns-end
 
 SELF = Path(__file__).resolve()
@@ -78,7 +86,14 @@ def scan(root: Path) -> list[tuple[str, int, str]]:
                 for rule, pattern in RULES:
                     if pattern.search(line):
                         findings.append((str(path.relative_to(root)), number, rule))
+                if _has_private_host(line):
+                    findings.append((str(path.relative_to(root)), number, "private-host"))
     return findings
+
+
+def _has_private_host(line: str) -> bool:
+    return any(hashlib.sha256(token.lower().encode("utf-8")).hexdigest() in PRIVATE_HOST_SHA256
+               for token in HOST_TOKEN.findall(line))
 
 
 def main(argv: list[str]) -> int:

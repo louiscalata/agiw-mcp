@@ -1,7 +1,9 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import importlib.util
 import unittest
+from unittest import mock
 
 from support import ROOT, IsolatedTestCase
 
@@ -15,10 +17,9 @@ SAMPLES = {
     "private-home-macos": "/Users/" + OWNER + "/project",
     "private-home-linux": "/home/" + OWNER + "/project",
     "private-user-at": OWNER + "@" + "example",
-    "private-host": "LOUIS" + "AURORAR12",
     "rfc1918-10": "10.0" + ".4.7",
     "rfc1918-172": "172.20" + ".1.1",
-    "rfc1918-192": "192.168" + ".1.71",
+    "rfc1918-192": "192.168" + ".0.10",
     "mdns-local-host": "studio-mac" + ".local",
     "notion-url": "https://app." + "notion.com/p/abc",
     "private-share": "Shared" + "Chami",
@@ -40,6 +41,20 @@ class ScrubTests(IsolatedTestCase):
             (folder / "file.txt").write_text("ok line\nvalue = " + sample + "\n", encoding="utf-8")
             findings = scrub_check.scan(folder)
             self.assertIn(("file.txt", 2, rule), findings, rule)
+
+    def test_private_host_matches_a_whole_token_by_digest(self):
+        # The shipped digests name real machines, so a stand-in digest is patched in.
+        digest = hashlib.sha256(b"example-studio-pc").hexdigest()
+        folder = self.tmp / "host"
+        folder.mkdir()
+        (folder / "a.txt").write_text("ok line\nhost EXAMPLE-Studio-PC.json\nexample-studio-pcx\n", encoding="utf-8")
+        with mock.patch.object(scrub_check, "PRIVATE_HOST_SHA256", frozenset({digest})):
+            self.assertEqual(scrub_check.scan(folder), [("a.txt", 2, "private-host")])
+
+    def test_private_host_digests_are_sha256(self):
+        self.assertTrue(scrub_check.PRIVATE_HOST_SHA256)
+        for digest in scrub_check.PRIVATE_HOST_SHA256:
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
 
     def test_safe_lookalikes_pass(self):
         folder = self.tmp / "safe"
