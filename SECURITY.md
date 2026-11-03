@@ -119,8 +119,9 @@ In scope:
 
 Out of scope:
 
-- Same-user shell/file access that forges consent, uncatchable termination
-  (SIGKILL or power loss), and automatic reclamation of abandoned ticket locks.
+- Same-user shell/file access that forges consent or ticket process-owner records.
+- Cleanup of running children or temporary files after uncatchable termination (SIGKILL or power loss).
+  Abandoned ticket locks now have bounded recovery as described below.
 - A compromised local account, Node.js or Python installation, or a malicious
   local model server. Anyone who can run commands as you can read your
   Keychain items through the same tools.
@@ -135,4 +136,18 @@ time, tool, SHA-256 and byte count of your text, whether it was truncated, the
 outcome code, HTTP status and number of flags. It never contains the text or
 the key. New logs are created with mode 0600 on macOS and Linux; an existing
 log keeps its mode. Nisi runs have no per-call log; ticket admission state is
-stored separately.
+stored separately. Admission and scope lock records include machine identity, PID, optional process
+start identity and creation time. Recovery requires matching local machine/PID-namespace identity,
+a minimum age of 60 seconds in both metadata and filesystem mtime, and a PID probe confirming
+that the process does not exist. A recorded start identity is checked; a live or unverifiable PID
+is never reclaimed, even after PID reuse. Foreign, legacy, partial or malformed records remain
+fail-closed. Recovery serializes reclaimers with `flock` on the candidate inode and checks pathname
+identity before unlinking through the verified directory descriptor. Symlinks, hardlinked candidates
+and files owned by another user are not reclaimed. This relies on reliable POSIX advisory locking,
+unique machine identities and the existing private-directory trust boundary; same-user manual
+replacement of lock files during recovery is outside that boundary.
+
+Successful recovery emits a `TICKET_LOCK_RECLAIMED` warning through Python logging (stderr by
+default), with lock kind, PID, reason and age. It omits owner text, host identifiers and scope paths.
+Recovery is demand-driven by a later admission, not a background service; incomplete lock writes
+still require manual cleanup after all active runs have been ruled out.

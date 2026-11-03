@@ -30,9 +30,10 @@ effective user with mode 0700. Anything else fails closed. The descriptor of
 the state directory is kept for each admitted ticket and its locks are
 released through it, so a registry renamed or replaced in the meantime is
 never touched. Any failure, including a failed write or close of a lock file,
-removes the files this call created. Locks left behind by a crashed process
-are not cleaned up: they refuse later admissions with a clear error until
-removed.
+removes the files this call created. Locks with a confirmed dead local owner
+are reclaimed after 60 seconds, serialized on the candidate inode. Missing or
+unverifiable owner data remains fail-closed; live PIDs and foreign hosts are
+never reclaimed.
 
 On Windows admission is refused (TICKET_UNSUPPORTED_PLATFORM) before the filesystem
 is touched: there is no reparse-point,
@@ -43,9 +44,11 @@ Refusals name only the ticket id, never the owner, the state or the scopes.
 """
 from __future__ import annotations
 
+import ctypes
 import errno
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -66,6 +69,14 @@ MAX_OWNER_CHARS = 256
 ADMIT_LOCK = "admit.lock"
 ADMIT_WAIT_SECONDS = 2.0
 MAX_SYMLINKS = 40
+STALE_LOCK_MIN_AGE_SECONDS = 60.0
+MAX_LOCK_BYTES = 16384
+_LOG = logging.getLogger(__name__)
+
+try:
+    import fcntl
+except ImportError:  # Windows admission is refused before recovery.
+    fcntl = None
 
 _TICKET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 # Win32 device names, reserved in any case and with any extension ("nul.txt", "COM1.tar.gz").
@@ -312,6 +323,130 @@ def _at(root: Path, dir_fd: int | None, name: str) -> tuple[str, dict]:
     return (name, {"dir_fd": dir_fd}) if dir_fd is not None else (str(root / name), {})
 
 
+def _host_identity() -> str | None:
+    """Stable machine identity, with Linux PID namespace isolation; never use hostname alone."""
+    try:
+        if sys.platform.startswith("linux"):
+            machine = Path("/etc/machine-id").read_text(encoding="ascii").strip()
+            namespace = os.readlink("/proc/self/ns/pid")
+            if re.fullmatch(r"[0-9a-fA-F]{32}", machine):
+                return "linux:" + machine.lower() + ":" + namespace
+        elif sys.platform == "darwin":
+            class Timespec(ctypes.Structure):
+                _fields_ = [("seconds", ctypes.c_long), ("nanoseconds", ctypes.c_long)]
+
+            value = (ctypes.c_ubyte * 16)()
+            gethostuuid = ctypes.CDLL(None, use_errno=True).gethostuuid
+            gethostuuid.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(Timespec)]
+            gethostuuid.restype = ctypes.c_int
+            if gethostuuid(value, ctypes.byref(Timespec(1, 0))) == 0 and any(value):
+                return "darwin:" + bytes(value).hex()
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def _process_start(pid: int) -> str | None:
+    """Best-effort start identity; failure is never evidence of process death."""
+    try:
+        if sys.platform.startswith("linux"):
+            # comm may contain spaces and parentheses; starttime is field 22.
+            fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+            boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            return boot + ":" + fields[19]
+        if sys.platform == "darwin":
+            # Darwin sys/proc_info.h: PROC_PIDTBSDINFO (3), struct proc_bsdinfo.
+            class ProcBSDInfo(ctypes.Structure):
+                _fields_ = [("flags_and_ids", ctypes.c_uint32 * 12),
+                            ("comm", ctypes.c_char * 16), ("name", ctypes.c_char * 32),
+                            ("files_and_groups", ctypes.c_uint32 * 5), ("nice", ctypes.c_int32),
+                            ("start_sec", ctypes.c_uint64), ("start_usec", ctypes.c_uint64)]
+
+            info = ProcBSDInfo()
+            proc_pidinfo = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True).proc_pidinfo
+            proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+            proc_pidinfo.restype = ctypes.c_int
+            size = ctypes.sizeof(info)
+            if proc_pidinfo(pid, 3, 0, ctypes.byref(info), size) == size:
+                return f"{info.start_sec}:{info.start_usec}"
+    except (OSError, ValueError, IndexError, AttributeError):
+        pass
+    return None
+
+
+def _lock_owner() -> dict:
+    return {"host": _host_identity(), "pid": os.getpid(), "startTime": _process_start(os.getpid()),
+            "createdAt": time.time()}
+
+
+def _dead_owner(record: dict, info: os.stat_result) -> bool:
+    owner = record.get("processOwner")
+    if not isinstance(owner, dict):
+        return False
+    pid, created = owner.get("pid"), owner.get("createdAt")
+    host = _host_identity()
+    if (not host or owner.get("host") != host or type(pid) is not int or not 0 < pid <= 2147483647
+            or type(created) not in (int, float) or not 0 < created <= time.time()):
+        return False
+    # Both the record and filesystem must be old enough (also refuses future timestamps).
+    if time.time() - max(created, info.st_mtime) < STALE_LOCK_MIN_AGE_SECONDS:
+        return False
+    recorded_start = owner.get("startTime")
+    if recorded_start is not None:
+        if not isinstance(recorded_start, str) or not recorded_start:
+            return False
+        if _process_start(pid) == recorded_start:
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False  # EPERM and unknown errors cannot establish death.
+    # Even a mismatching start identity does not authorize removing a live PID's lock.
+    return False
+
+
+def _reclaim_stale(root: Path, dir_fd: int | None, name: str) -> bool:
+    """Compare and unlink a dead owner's lock under an inode flock; only one reclaimer wins.
+
+    No extra recovery lock file can itself be stranded by a crash. Waiters on an old
+    inode must verify the pathname again, so they cannot unlink its replacement.
+    Recovery requires the descriptor-based, verified private registry directory.
+    """
+    if dir_fd is None or fcntl is None:
+        return False
+    target, at = _at(root, dir_fd, name)
+    try:
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, **at)
+    except OSError:
+        return False
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
+            return False
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        data = os.read(fd, MAX_LOCK_BYTES + 1)
+        if len(data) > MAX_LOCK_BYTES:
+            return False
+        record = json.loads(data.decode("utf-8"))
+        if not isinstance(record, dict) or not _dead_owner(record, info):
+            return False
+        current = os.stat(target, follow_symlinks=False, **at)
+        if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+            return False
+        os.unlink(target, **at)
+        # No scope, user-supplied owner, host identifier or arbitrary filename in the receipt.
+        kind = "admission" if name == ADMIT_LOCK else "scope"
+        _LOG.warning("TICKET_LOCK_RECLAIMED kind=%s pid=%d reason=dead_local_owner age_seconds=%d",
+                     kind, record["processOwner"]["pid"], int(time.time() - info.st_mtime))
+        return True
+    except (OSError, UnicodeError, ValueError):
+        return False
+    finally:
+        os.close(fd)
+
+
 def _create_exclusive(root: Path, dir_fd: int | None, name: str, data: bytes) -> None:
     """Create ``name`` exclusively holding all of ``data``; on any failure the created file is removed."""
     target, at = _at(root, dir_fd, name)
@@ -375,6 +510,8 @@ class Registry:
         held = []
         names = os.listdir(self.root if dir_fd is None else dir_fd)
         for name in sorted(n for n in names if n.startswith("scope-") and n.endswith(".lock")):
+            if _reclaim_stale(self.root, dir_fd, name):
+                continue
             try:
                 record = json.loads(_read(self.root, dir_fd, name).decode("utf-8"))
             except FileNotFoundError:
@@ -390,11 +527,14 @@ class Registry:
 
     def _acquire_admission(self, dir_fd: int | None, ticket_id: str) -> None:
         deadline = time.monotonic() + ADMIT_WAIT_SECONDS
+        data = json.dumps({"processOwner": _lock_owner()}).encode("utf-8")
         while True:
             try:
-                _create_exclusive(self.root, dir_fd, ADMIT_LOCK, str(os.getpid()).encode("ascii"))
+                _create_exclusive(self.root, dir_fd, ADMIT_LOCK, data)
                 return
             except FileExistsError:
+                if _reclaim_stale(self.root, dir_fd, ADMIT_LOCK):
+                    continue
                 if time.monotonic() >= deadline:
                     raise ToolError("TICKET_REGISTRY_BUSY", "Another admission holds the ticket registry lock "
                                     "(or a crashed run left it behind); nothing was admitted. Try again, or "
@@ -439,9 +579,11 @@ class Registry:
                 if holder == ticket_id or any(overlaps(scope_key, key) for key in clean["writeScope"]):
                     raise ToolError("TICKET_SCOPE_CONFLICT", "The ticket's write scope overlaps a ticket "
                                     "that is already admitted; nothing was admitted.", ticketId=ticket_id)
+            process_owner = _lock_owner()
             for key in clean["writeScope"]:
                 name = _scope_name(key)
-                data = json.dumps({"scope": key, "ticketId": ticket_id, "owner": clean["owner"]}).encode("utf-8")
+                data = json.dumps({"scope": key, "ticketId": ticket_id, "owner": clean["owner"],
+                                   "processOwner": process_owner}).encode("utf-8")
                 try:
                     _create_exclusive(self.root, dir_fd, name, data)
                 except FileExistsError:
