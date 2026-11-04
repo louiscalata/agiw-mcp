@@ -72,8 +72,9 @@ in `jev.status` (`READY` or `NOT_READY`) with its consent and key checks.
 - **One tool call at a time per server process.** During Nisi runs, ping and
   cancellation remain responsive. Separate server processes can run concurrently.
 - **No telemetry.** The only per-call log is a Jev activity log of hashes, sizes
-  and outcome codes, never your text. Other local state includes `config.json`,
-  `consent.json`, the rotated `jev-activity.jsonl.1`, and ticket admission state.
+  and outcome codes, never your text. The live log is `jev-activity.jsonl`, rotated
+  to `jev-activity.jsonl.1` on the next write after it exceeds 1 MiB. Other local
+  state includes `config.json`, `consent.json`, and ticket admission state.
 
 ## Tools
 
@@ -125,8 +126,9 @@ uvx --from . agiw-mcp --version
 `AGIW_MCP_CONFIG_DIR` overrides the config directory and must be an absolute path.
 
 All keys in `config.json` are optional; unknown keys are refused. Besides the three
-shown in the quick start: `keychain_service` (default `agiw-mcp`), `keychain_account`
-(default `typesafe`), `jev_model` (default `jev-1.14.0`), `max_output_tokens`
+shown in the quick start: `reviewer_base_url` (optional), `keychain_service`
+(default `agiw-mcp`), `keychain_account` (default `typesafe`), `jev_model`
+(default `jev-1.14.0`), `max_output_tokens`
 (default 4096), `reasoning_effort` (unset by default) and `require_ticket` (default `false`).
 
 `require_ticket: true` makes `agiw_nisi_run` refuse any request without a claim ticket.
@@ -304,14 +306,17 @@ check the directory for reparse points, ownership and permissions. Runs without 
 still work on Windows unless `require_ticket` is `true`.
 Refusals name only the ticket id.
 
-Its static checks compile Python (`compile` without execution), parse JavaScript
-(`node --check`) and JSON; other file types get structural checks only, and the result says which files were
-checked. Python uses the interpreter running agiw-mcp; `pythonCheckerVersion`
-reports that version, so syntax for a newer Python may fail. Its tests are: at least
-one file changed, no proposed file is empty, and your assertions. Limits: `files` and `new_files` each allow up to 64 entries, with no
-combined cap. Supplied file contents are limited to 256 KiB per file and 512 KiB
-in total, measured as UTF-8 bytes. Proposed file contents have a separate 2 MiB
-total limit.
+Its static checks compile Python (`.py`, using `compile` without execution), parse
+JavaScript (`.js`, `.mjs`, `.cjs`, using `node --check`) and JSON (`.json`). Every
+proposed file is scanned for NUL characters. Other extensions report `NOT_SUPPORTED`
+in the per-file `syntax` results; this does not fail the static-check stage, so
+`COMPLETED` does not mean those files were parsed. Python uses the interpreter
+running agiw-mcp; `pythonCheckerVersion` reports that version, so syntax for a newer
+Python may fail. Its tests are: at least one file changed, no proposed file is empty
+or whitespace-only, and your assertions. Limits: `files` and `new_files` each allow
+up to 64 entries, with no combined cap. Supplied file contents are limited to
+256 KiB per file and 512 KiB in total, measured as UTF-8 bytes. Proposed file
+contents have a separate 2 MiB total limit.
 
 Tool calls are serialized per process. During Nisi runs, ping and cancellation are
 handled while up to 16 other messages wait in the pending queue (with an additional

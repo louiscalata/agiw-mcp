@@ -64,8 +64,8 @@ exchange may already have sent its request. There is no automatic retry.
 
 - Inputs are file contents in the request, never paths. agiw-mcp does not read
   or write project files.
-- Each run gets a fresh private temporary directory (mode 0700). The vendored
-  Nisi files are copied into it and their bytes are checked against the pinned
+- Each run gets a fresh private temporary directory (mode 0700 on macOS and Linux).
+  The vendored Nisi files are copied into it and their bytes are checked against the pinned
   manifest (itself pinned by SHA-256) before Node starts. The host runner is
   copied separately and is not covered by that manifest. agiw-mcp
   attempts to remove the directory afterwards, also on failure, timeout, cancellation,
@@ -132,10 +132,12 @@ Out of scope:
 ## Local records
 
 `jev-activity.jsonl` in the config directory records, per Jev call:
-time, tool, SHA-256 and byte count of your text, whether it was truncated, the
-outcome code, HTTP status and number of flags. It never contains the text or
-the key. New logs are created with mode 0600 on macOS and Linux; an existing
-log keeps its mode. Nisi runs have no per-call log; ticket admission state is
+time, tool, SHA-256 and byte count of your text, the JSON request body's SHA-256
+(`requestSha256`), the text's byte count after truncation (`sentBytes`), whether it
+was truncated, the outcome code, HTTP status, number of flags and elapsed
+milliseconds (`elapsedMs`). It never contains the text or the key. New logs are
+created with mode 0600 on macOS and Linux; an existing log keeps its mode.
+Nisi runs have no per-call log; ticket admission state is
 stored separately. Admission and scope lock records include machine identity, PID, optional process
 start identity and creation time. Recovery requires matching local machine/PID-namespace identity,
 a minimum age of 60 seconds in both metadata and filesystem mtime, and a PID probe confirming
