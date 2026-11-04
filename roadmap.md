@@ -30,8 +30,8 @@ Canonical roadmap for this checkout. Base revision: `417db82`.
 
 Local logs are under ignored `.venv/`: `all-regressions-before.log`,
 `all-regressions-after.log`, `final-tests.log`, `build.log`,
-`installed-wheel.log` and `installed-sdist.log`. No real model/provider calls,
-commit, branch, tag, push or PR is part of this task. Final discovery ran 217 tests:
+`installed-wheel.log` and `installed-sdist.log`. No real model/provider calls were
+made. Final discovery ran 217 tests:
 173 passed and 44 listening-fixture tests were explicitly skipped. All 18 new
 regression tests failed on the base (24 failures including subtests) and passed after the fixes. The vendored Nisi bytes
 and manifest remain unchanged.
@@ -52,7 +52,7 @@ and manifest remain unchanged.
   they are blocked tests, not passes or skips. No assertion failures remain.
 - [x] Run `ruff check src tests scripts` and `git diff --check`: passed.
 
-No commit or push was made. The earlier 217-test evidence above describes the prior
+The earlier 217-test evidence above describes the prior
 remediation run; this section records the subsequent Grok follow-up.
 
 ## Stale-lock recovery
@@ -64,9 +64,7 @@ remediation run; this section records the subsequent Grok follow-up.
   foreign/legacy/live-lock retention and replacement-inode protection. All 17 pass.
 - [x] Run the requested full suite: 243 tests, 199 passed, 44 loopback-bind PermissionError
   errors imposed by the sandbox; zero assertion failures. These errors are blocked tests.
-- [x] Run Ruff and git diff --check: passed. Write `.pr/stale-lock-recovery.md` with exact output.
 - [ ] Run the full suite with loopback listening permitted and validate on native Linux.
 
-Final local output is `/private/tmp/stale-full-tests.log`; the focused log is
-`/private/tmp/stale-focused.log`. No commit or push. External review was unavailable: Claude
+External review for this recovery run was unavailable: Claude
 CLI was logged out, and the fallback worker status tool required unavailable approval.
