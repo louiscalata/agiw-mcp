@@ -86,8 +86,12 @@ def handle(message):
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return _error(None, INVALID_REQUEST, "Invalid Request")
     if "method" not in message:
-        # A response to a server request; this server sends none, so ignore it.
-        return None
+        if "result" in message or "error" in message:
+            # A response to a server request; this server sends none, so ignore it.
+            return None
+        # Neither a request nor a response: answer it, or a client waiting on that id hangs forever.
+        identifier = message.get("id")
+        return _error(identifier if _valid_id(identifier) else None, INVALID_REQUEST, "Invalid Request")
     method = message.get("method")
     has_id = "id" in message
     identifier = message.get("id")

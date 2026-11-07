@@ -49,6 +49,25 @@ class NetTests(IsolatedTestCase):
         self.assertFalse([h for h in opener.handlers if getattr(h, "proxies", None)])
         self.assertEqual((status, body), (200, {"ok": True}))
 
+    def test_a_reply_cut_off_mid_body_is_unreachable(self):
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        self.addCleanup(listener.close)
+
+        def cut_off():
+            conn, _ = listener.accept()
+            with conn:
+                conn.recv(65536)
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                             b"Transfer-Encoding: chunked\r\n\r\n10\r\n{\"data\": [")
+
+        threading.Thread(target=cut_off, daemon=True).start()
+        with self.assertRaises(net.HttpFailure) as ctx:
+            net.request_json(f"http://127.0.0.1:{port}/v1/models", timeout=3.0, max_bytes=8192)
+        self.assertEqual(ctx.exception.kind, "unreachable")
+
     def test_total_deadline_against_a_trickling_server(self):
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))

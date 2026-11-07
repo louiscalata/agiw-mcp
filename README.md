@@ -34,7 +34,7 @@ pipx install .
 **2. Point it at your local model server.** You need an OpenAI-compatible server on
 your own machine (for example LM Studio) and two different models: an author and a
 reviewer. Save this as `config.json` in `~/Library/Application Support/agiw-mcp/`
-(macOS) or `~/.config/agiw-mcp/` (Linux):
+(macOS), `~/.config/agiw-mcp/` (Linux) or `%APPDATA%\agiw-mcp\` (Windows):
 
 ```json
 {
@@ -144,7 +144,7 @@ The model settings can come from the environment instead:
 
 | Config key | Environment variable | Precedence and validation |
 |---|---|---|
-| `model_base_url` | `AGIW_MCP_BASE_URL` | `AGIW_MCP_BASE_URL`, then legacy `AGIW_MCP_MODEL_BASE_URL` when `AGIW_MCP_BASE_URL` is unset or empty, then the config file, then `http://127.0.0.1:1234/v1`. Only HTTP loopback literals (`127.0.0.1` or `[::1]`) are accepted; for a server on port 1235, use `http://127.0.0.1:1235/v1`. |
+| `model_base_url` | `AGIW_MCP_BASE_URL` | `AGIW_MCP_BASE_URL`, then legacy `AGIW_MCP_MODEL_BASE_URL` when `AGIW_MCP_BASE_URL` is unset or empty, then the config file, then `http://127.0.0.1:1234/v1`. Only HTTP loopback literals (`127.0.0.1` or `[::1]`) are accepted; for a server on another port, use `http://127.0.0.1:<port>/v1`. |
 | `reviewer_base_url` | `AGIW_MCP_REVIEWER_BASE_URL` | Optional. `AGIW_MCP_REVIEWER_BASE_URL`, then the config file, then unset, which means the reviewer uses `model_base_url`. Set it to send the reviewer's requests to a different local server, for example `http://127.0.0.1:1245/v1`. Same loopback-only rule as `model_base_url`. |
 
 Check your setup at any time:

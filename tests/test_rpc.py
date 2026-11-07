@@ -83,6 +83,14 @@ class RpcTests(IsolatedTestCase):
         self.assertEqual(codes, [-32700, -32600, -32601, -32602, -32602, -32600, -32600, -32700, None])
         self.assertEqual(replies[-1], {"jsonrpc": "2.0", "id": 9, "result": {}})
 
+    def test_a_frame_that_is_neither_request_nor_response_is_answered(self):
+        replies = exchange(frame([INIT]), frame({"jsonrpc": "2.0", "id": 11}),
+                           frame({"jsonrpc": "2.0", "id": 12, "result": {}}),
+                           frame({"jsonrpc": "2.0", "id": 13, "method": "ping"}))
+        # The bare {"id": 11} frame gets Invalid Request; a real response (id 12) still gets no reply.
+        self.assertEqual([(reply.get("id"), reply.get("error", {}).get("code")) for reply in replies[1:]],
+                         [(11, -32600), (13, None)])
+
     def test_tool_errors_are_results_not_protocol_errors(self):
         reply = exchange(frame({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                                 "params": {"name": "agiw_readiness", "arguments": {"bogus": 1}}}))[0]
