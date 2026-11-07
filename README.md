@@ -47,7 +47,7 @@ reviewer. Save this as `config.json` in `~/Library/Application Support/agiw-mcp/
 **3. Add it to your assistant**
 
 ```bash
-claude mcp add agiw-mcp -- agiw-mcp
+claude mcp add agiw -- agiw-mcp
 ```
 
 (Factory and OpenCode are under [Setup details](#setup-details).)
@@ -209,20 +209,20 @@ is sent, you are asked again. See [SECURITY.md](SECURITY.md).
 **Claude Code**
 
 ```bash
-claude mcp add agiw-mcp -- agiw-mcp
+claude mcp add agiw -- agiw-mcp
 ```
 
 With the model settings in the environment:
 
 ```bash
-claude mcp add agiw-mcp -e AGIW_MCP_AUTHOR_MODEL=your-author-model-id \
+claude mcp add agiw -e AGIW_MCP_AUTHOR_MODEL=your-author-model-id \
   -e AGIW_MCP_REVIEWER_MODEL=your-reviewer-model-id -- agiw-mcp
 ```
 
 **Factory (droid)**
 
 ```bash
-droid mcp add agiw-mcp agiw-mcp
+droid mcp add agiw agiw-mcp
 ```
 
 or in `~/.factory/mcp.json`:
@@ -230,7 +230,7 @@ or in `~/.factory/mcp.json`:
 ```json
 {
   "mcpServers": {
-    "agiw-mcp": { "type": "stdio", "command": "agiw-mcp", "args": [] }
+    "agiw": { "type": "stdio", "command": "agiw-mcp", "args": [] }
   }
 }
 ```
@@ -240,7 +240,7 @@ or in `~/.factory/mcp.json`:
 ```json
 {
   "mcp": {
-    "agiw-mcp": { "type": "local", "command": ["agiw-mcp"], "enabled": true }
+    "agiw": { "type": "local", "command": ["agiw-mcp"], "enabled": true }
   }
 }
 ```

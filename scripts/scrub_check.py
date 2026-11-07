@@ -72,6 +72,10 @@ def scan(root: Path) -> list[tuple[str, int, str]]:
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.endswith(SKIP_SUFFIXES))
         for name in sorted(files):
             path = Path(base, name)
+            if name == ".git" and Path(base) == root:
+                # In a git worktree or submodule, .git is a one-line pointer file naming the
+                # local checkout path; it is never published, like the .git directory.
+                continue
             if path.is_symlink() or not path.is_file():
                 continue
             if path.stat().st_size > MAX_FILE_BYTES:
