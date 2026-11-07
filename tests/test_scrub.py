@@ -34,6 +34,15 @@ class ScrubTests(IsolatedTestCase):
         findings = scrub_check.scan(ROOT)
         self.assertEqual(findings, [], "\n".join(f"{p}:{n}: {r}" for p, n, r in findings))
 
+    def test_a_worktree_git_pointer_is_skipped_only_at_the_root(self):
+        pointer = "gitdir: " + SAMPLES["private-home-macos"] + "/.git/worktrees/x\n"
+        (self.tmp / ".git").write_text(pointer)
+        self.assertEqual(scrub_check.scan(self.tmp), [])
+        nested = self.tmp / "docs"
+        nested.mkdir()
+        (nested / ".git").write_text(pointer)
+        self.assertEqual([(p, r) for p, _, r in scrub_check.scan(self.tmp)], [("docs/.git", "private-home-macos")])
+
     def test_each_rule_fires(self):
         for rule, sample in SAMPLES.items():
             folder = self.tmp / rule
