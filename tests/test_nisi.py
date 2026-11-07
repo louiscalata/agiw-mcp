@@ -379,6 +379,19 @@ class NisiEndToEndTests(IsolatedTestCase):
         tests_stage = [stage for stage in result["stages"] if stage["stage"] == "tests"][0]
         self.assertEqual(tests_stage["failures"][0]["code"], "NO_CHANGE")
 
+    def test_many_long_empty_files_still_give_a_readable_finding(self):
+        # 20 empty files with ~200-character names made one finding over Nisi's 2048-character limit,
+        # which Nisi refused (TESTS_FINDING_INVALID) instead of letting repair see what was wrong.
+        paths = ["pkg/" + "/".join(["n" * 60] * 3) + f"/f{index:02d}.txt" for index in range(20)]
+        self.models.draft = lambda prompt: {"candidate": {"files": [{"path": path, "content": ""} for path in paths]},
+                                            "note": "Empty files."}
+        result = self.run_tool({"task": "Add files.", "new_files": paths, "repair_budget": 0})
+        tests_stage = [stage for stage in result["stages"] if stage["stage"] == "tests"][0]
+        failure = tests_stage["failures"][0]
+        self.assertEqual(failure["code"], "EMPTY_FILE", result)
+        self.assertLessEqual(len(failure["message"]), 2048)
+        self.assertIn("and 15 more", failure["message"])
+
     def test_reviewer_findings_fail_the_run(self):
         self.models.draft = lambda prompt: {"candidate": {"files": [
             {"path": "lib.mjs", "content": "export const answer = 42;\n"}]}, "note": "New module."}

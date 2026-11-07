@@ -220,7 +220,11 @@ async function main() {
       assert(candidate.files.some(file => original.get(file.path) !== file.content), 'NO_CHANGE',
         'The candidate does not change any file.');
       const empty = candidate.files.filter(file => file.content.trim() === '').map(file => file.path);
-      assert(empty.length === 0, 'EMPTY_FILE', `Empty proposed files: ${empty.join(', ')}.`);
+      // Nisi refuses a finding message over 2048 characters, which would block repair: name at most
+      // five files and count the rest.
+      const named = empty.slice(0, 5).map(path => path.length > 200 ? `${path.slice(0, 200)}...` : path);
+      const more = empty.length > named.length ? ` and ${empty.length - named.length} more` : '';
+      assert(empty.length === 0, 'EMPTY_FILE', `Empty proposed files: ${named.join(', ')}${more}.`);
       request.assertions.forEach((item, index) => {
         const content = proposed.has(item.path) ? proposed.get(item.path) : original.get(item.path);
         const code = `ASSERTION_${index + 1}`;

@@ -166,7 +166,9 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
         except Exception:
             pass
         raise HttpFailure("http", status) from None
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
+        # HTTPException covers a reply cut off mid-body (IncompleteRead) or a garbled status line:
+        # the server is not answering usefully, which callers report as unreachable.
         raise HttpFailure("unreachable") from None
     if len(raw) > max_bytes:
         raise HttpFailure("too_large", status)
