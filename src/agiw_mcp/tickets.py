@@ -647,10 +647,3 @@ def registry(root: Path | None = None) -> Registry:
             _REGISTRIES[key] = Registry(path)
         return _REGISTRIES[key]
 
-
-def admit(ticket, root: Path | None = None) -> dict:
-    return registry(root).admit(ticket)
-
-
-def release(ticket_id: str, root: Path | None = None) -> bool:
-    return registry(root).release(ticket_id)
