@@ -48,7 +48,7 @@ def _consent_cli(action: str) -> int:
         except (EOFError, KeyboardInterrupt):
             print("\nConsent was not recorded.")
             return 1
-        # Accept the phrase with any case, surrounding quotes or a final full stop; nothing else.
+        # Accept the phrase with any case, surrounding quotes or trailing full stops; nothing else.
         if answer.strip().strip("'\"").rstrip(".").strip().casefold() != "i agree":
             print('Consent was not recorded. Run the command again and type only the two words "I agree".')
             return 1
