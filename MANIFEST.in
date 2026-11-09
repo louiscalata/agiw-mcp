@@ -1,0 +1,3 @@
+# Distutils adds tests/test*.py and leaves out the helpers those tests import.
+recursive-include tests *.py
+recursive-include scripts *.py
