@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import io
 import json
+import re
 import subprocess
 import sys
 from unittest import mock
@@ -21,6 +22,16 @@ class CliTests(IsolatedTestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.decode().strip(), f"agiw-mcp {__version__}")
         self.assertEqual(done.stderr, b"")
+
+    def test_version_matches_pyproject_and_the_cli(self):
+        text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', text)
+        self.assertIsNotNone(match)
+        declared = match.group(1)
+        self.assertEqual(declared, __version__)
+        done = self.invoke("--version")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.decode().strip(), f"agiw-mcp {declared}")
 
     def test_readiness_exit_codes(self):
         for status, expected in (("READY", 0), ("NOT_READY", 1)):
