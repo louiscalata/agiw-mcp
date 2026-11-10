@@ -332,7 +332,8 @@ class ConfigTests(IsolatedTestCase):
     def test_per_os_config_dir(self):
         del os.environ["AGIW_MCP_CONFIG_DIR"]
         with mock.patch.object(config.sys, "platform", "darwin"):
-            self.assertTrue(str(config.config_dir()).endswith("Library/Application Support/agiw-mcp"))
+            shown = str(config.config_dir()).replace("\\", "/")
+            self.assertTrue(shown.endswith("Library/Application Support/agiw-mcp"))
         if os.name == "nt":
             # Path follows the real os.name. Pretending this process is POSIX cannot build that path.
             with mock.patch.object(config.sys, "platform", "win32"):

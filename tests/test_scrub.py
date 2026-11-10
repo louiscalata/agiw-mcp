@@ -41,7 +41,8 @@ class ScrubTests(IsolatedTestCase):
         nested = self.tmp / "docs"
         nested.mkdir()
         (nested / ".git").write_text(pointer)
-        self.assertEqual([(p, r) for p, _, r in scrub_check.scan(self.tmp)], [("docs/.git", "private-home-macos")])
+        found = [(p.replace("\\", "/"), r) for p, _, r in scrub_check.scan(self.tmp)]
+        self.assertEqual(found, [("docs/.git", "private-home-macos")])
 
     def test_each_rule_fires(self):
         for rule, sample in SAMPLES.items():

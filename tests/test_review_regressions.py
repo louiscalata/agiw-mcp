@@ -16,6 +16,7 @@ from agiw_mcp.errors import ToolError
 
 
 class ReviewRegressions(IsolatedTestCase):
+    @unittest.skipIf(sys.platform == "win32", "this check uses a Unix socket pair")
     def test_http_deadline_closes_headers_and_body_sockets(self):
         import socket
         for headers in (False, True):
@@ -124,7 +125,9 @@ class ReviewRegressions(IsolatedTestCase):
         with mock.patch.object(nisi, "_kill_tree") as kill:
             result = nisi._bounded_run([sys.executable, "-I", "-S", "-B", "-c", "print('ok')"],
                                        data=b"", cwd=str(self.tmp), env={}, timeout=3)
-        self.assertEqual(result, (0, b"ok\n", "exited"))
+        self.assertEqual(result[0], 0)
+        self.assertEqual(result[2], "exited")
+        self.assertEqual(result[1].replace(b"\r\n", b"\n"), b"ok\n")
         kill.assert_not_called()
 
     def test_consent_prompt_eof_and_interrupt_record_nothing(self):
@@ -323,6 +326,10 @@ sys.exit(__main__.main([]))
                     for path in self.config_dir.glob("tickets/scope-*.lock"):
                         path.unlink()
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "ticket admission is refused on Windows before the ticket directory is touched",
+    )
     def test_ticket_lock_records_owner(self):
         registry = tickets.Registry(self.tmp / "tickets")
         registry.admit({"ticketId": "owner", "claimState": "Granted", "writeScope": ["src"], "owner": "writer"})
