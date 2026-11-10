@@ -11,6 +11,7 @@
 // local-chat adapter.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { request as httpRequest } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { runWorkflow } from './nisi/package/workflow/engine.mjs';
 import { createLocalChatAuthorAdapter, createLocalChatReviewerAdapter } from './nisi/package/adapters/local-chat.mjs';
@@ -112,7 +113,7 @@ function withReasoningEffort(effort, onReasoningOnly, wireHashes) {
       init = { ...init, body: JSON.stringify({ ...body, reasoning_effort: effort }) };
     }
     wireHashes.set(adapterHash, sha256(init.body));
-    const response = await globalThis.fetch(url, init);
+    const response = await modelFetch(url, init);
     if (!response.ok || !response.body?.getReader) return response;
     const chunks = [];
     let total = 0;
@@ -165,6 +166,62 @@ function buildAdapters(request, onReasoningOnly, wireHashes) {
 }
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
+
+// Node's global fetch is undici, whose headersTimeout and bodyTimeout are 300_000 ms.
+// timeout_seconds may be as long as 1800, so a model call must not inherit that cap.
+// Tests set AGIW_MCP_UNDICI_HEADERS_TIMEOUT_MS to a small stand-in for 300_000. This
+// transport reads it and does not apply it; the adapter abort signal is the deadline.
+function undiciHeadersTimeoutMs() {
+  const raw = process.env.AGIW_MCP_UNDICI_HEADERS_TIMEOUT_MS;
+  if (raw == null || raw === '') return 300_000;
+  if (!/^[0-9]+$/u.test(raw)) fail('REQUEST_INVALID');
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 300_000) fail('REQUEST_INVALID');
+  return value;
+}
+
+function loopbackFetch(url, init = {}) {
+  undiciHeadersTimeoutMs();
+  let target;
+  try { target = new URL(url); }
+  catch { return Promise.reject(Object.assign(new Error('LOCAL_CHAT_ENDPOINT_INVALID'), { code: 'LOCAL_CHAT_ENDPOINT_INVALID' })); }
+  if (target.protocol !== 'http:' || target.username || target.password
+      || (target.hostname !== '127.0.0.1' && target.hostname !== '::1')) {
+    return Promise.reject(Object.assign(new Error('LOCAL_CHAT_DESTINATION_REFUSED'), { code: 'LOCAL_CHAT_DESTINATION_REFUSED' }));
+  }
+  const body = init.body == null ? Buffer.alloc(0) : Buffer.from(init.body);
+  const headers = { ...(init.headers ?? {}), 'content-length': String(body.length) };
+  return new Promise((resolve, reject) => {
+    let req;
+    try {
+      req = httpRequest({
+        hostname: target.hostname, port: target.port, family: target.hostname === '::1' ? 6 : 4,
+        path: `${target.pathname}${target.search}`, method: init.method || 'POST', headers, signal: init.signal,
+      }, res => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => {
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(res.headers)) {
+            if (Array.isArray(value)) value.forEach(item => headers.append(name, item));
+            else if (value != null) headers.append(name, value);
+          }
+          resolve(new Response(Buffer.concat(chunks), {
+            status: res.statusCode ?? 0, statusText: res.statusMessage ?? '', headers,
+          }));
+        });
+        res.on('error', reject);
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+const modelFetch = globalThis.agiwMcpFetch ?? loopbackFetch;
 
 async function main() {
   const request = await readRequest();

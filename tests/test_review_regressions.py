@@ -215,7 +215,7 @@ class RunnerRegressions(IsolatedTestCase):
         harness = '''
 import { createHash } from 'node:crypto';
 const hashes = [];
-globalThis.fetch = async (_url, init) => {
+globalThis.agiwMcpFetch = async (_url, init) => {
   hashes.push(createHash('sha256').update(init.body).digest('hex'));
   const body = JSON.parse(init.body);
   const answer = body.model === 'author'
