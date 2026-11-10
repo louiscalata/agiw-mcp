@@ -10,6 +10,10 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
 
+### Packaging
+
+- Discover `agiw_mcp` namespace packages so a build no longer warns that the vendored Nisi directories would be ignored. The installed files are unchanged.
+
 ### This change
 
 - Rewrite the README as a landing page: pitch, the install and readiness commands that were run, how readiness, consent-gated Jev and Nisi work, and an honest status. Badges are CI, Apache-2.0 and Python 3.10+.
