@@ -10,7 +10,8 @@ permissions:
 jobs:
   test:
     name: Python ${{ matrix.python }} / Node ${{ matrix.node }} / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    # Same-repo macOS legs use Louis's Mac runner; fork pull requests stay on GitHub-hosted runners.
+    runs-on: ${{ matrix.os == 'macos-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","mac-m5"]') || matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
