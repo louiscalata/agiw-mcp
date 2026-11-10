@@ -333,9 +333,15 @@ class ConfigTests(IsolatedTestCase):
         del os.environ["AGIW_MCP_CONFIG_DIR"]
         with mock.patch.object(config.sys, "platform", "darwin"):
             self.assertTrue(str(config.config_dir()).endswith("Library/Application Support/agiw-mcp"))
-        with mock.patch.object(config.sys, "platform", "linux"), mock.patch.object(config.os, "name", "posix"):
-            os.environ["XDG_CONFIG_HOME"] = str(self.tmp / "xdg")
-            self.assertEqual(config.config_dir(), self.tmp / "xdg" / "agiw-mcp")
+        if os.name == "nt":
+            # Path follows the real os.name. Pretending this process is POSIX cannot build that path.
+            with mock.patch.object(config.sys, "platform", "win32"):
+                os.environ["APPDATA"] = str(self.tmp / "Roaming")
+                self.assertEqual(config.config_dir(), self.tmp / "Roaming" / "agiw-mcp")
+        else:
+            with mock.patch.object(config.sys, "platform", "linux"), mock.patch.object(config.os, "name", "posix"):
+                os.environ["XDG_CONFIG_HOME"] = str(self.tmp / "xdg")
+                self.assertEqual(config.config_dir(), self.tmp / "xdg" / "agiw-mcp")
 
 
 class NetworkGuardTests(IsolatedTestCase):
