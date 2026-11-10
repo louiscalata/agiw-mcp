@@ -20,7 +20,7 @@ import fs from 'node:fs';
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixture.json', import.meta.url), 'utf8'));
 const calls = [];
 const bodies = [];
-globalThis.fetch = async (url, init) => {
+globalThis.agiwMcpFetch = async (url, init) => {
   const body = JSON.parse(init.body);
   const operation = body.response_format.json_schema.name.replace('nisi_', '');
   calls.push([operation, body.model]);
