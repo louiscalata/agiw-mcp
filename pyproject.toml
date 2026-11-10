@@ -26,9 +26,13 @@ Issues = "https://github.com/louiscalata/agiw-mcp/issues"
 [project.scripts]
 agiw-mcp = "agiw_mcp.__main__:main"
 
+# Namespace discovery keeps the vendored Nisi directories on the package list.
+# Without that, setuptools warns that those directories "would be ignored"
+# even though package-data still copies the files.
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["agiw_mcp"]
+include = ["agiw_mcp*"]
+namespaces = true
 
 [tool.setuptools.package-data]
 agiw_mcp = [

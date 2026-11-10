@@ -82,7 +82,12 @@ jobs:
         run: |
           python -m pip install build ruff
           ruff check src tests scripts
-          python -m build
+          python -m build > "$RUNNER_TEMP/build.log" 2>&1 || { cat "$RUNNER_TEMP/build.log"; exit 1; }
+          if grep -q "Package would be ignored" "$RUNNER_TEMP/build.log"; then
+            cat "$RUNNER_TEMP/build.log"
+            echo "setuptools warned that a package directory would be ignored"
+            exit 1
+          fi
           python - << 'PY'
           import tarfile
           from pathlib import Path
