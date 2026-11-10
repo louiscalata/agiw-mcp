@@ -41,6 +41,8 @@ The JSON has `"status": "NOT_READY"` and `"missing": {"id": "models", ...}`. Wit
 
 With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize request for protocol `2025-03-26`, then `tools/list`, returned server `agiw-mcp` `0.1.0` and these tools: `agiw_readiness`, `agiw_status`, `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, `agiw_nisi_run`.
 
+Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are in [Client setup](#client-setup).
+
 ## How it works
 
 Say "initiate online code mode" with no task. The assistant should call `agiw_readiness` and report `READY`, or the first missing local prerequisite and its fix. That call starts nothing.
@@ -59,7 +61,7 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 
 - Install from a checkout with `pipx install .` or `uv tool install .`, and from git with `main` or `v0.1.0`.
 - `agiw-mcp --version`, `agiw-mcp readiness`, and the stdio initialize / `tools/list` handshake.
-- The six tools above, on Python 3.10+ . CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24.
+- The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24.
 - Vendored Nisi v0.2.0, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text.
 
@@ -68,7 +70,7 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 - A release newer than `v0.1.0`. Main has later fixes and still reports `0.1.0`.
 - PyPI. Install from git or from a checkout.
 - Windows in CI. Ticket admission is refused on Windows (`TICKET_UNSUPPORTED_PLATFORM`) before it touches the ticket directory. Runs without a ticket still work there unless `require_ticket` is true.
-- Readiness does not download models, start LM Studio, or open an MCP client. Claude Code, Factory and OpenCode are not launched by these tests.
+- Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
 - Granting consent is not an OS user-presence check. Any same-user process that can write the config directory can change `consent.json`.
 - `COMPLETED` does not apply files. You do that yourself, after reading the proposal.
 
@@ -143,9 +145,74 @@ agiw-mcp consent revoke
 
 ### Client setup
 
-Point the client at the `agiw-mcp` executable, with no arguments. If the client cannot find it, use the absolute path from `command -v agiw-mcp`, and make sure `node` is on that client's `PATH`.
+Point the client at the `agiw-mcp` executable, with no arguments. If the client cannot find it, use the absolute path from `command -v agiw-mcp`. A desktop app often does not inherit a shell `PATH`, so that absolute path is the reliable `command` there. `node` has to be on the same `PATH` the client gives the server.
 
-Claude Code can register it with `claude mcp add agiw -- agiw-mcp`. Factory can use `droid mcp add agiw agiw-mcp`, or `~/.factory/mcp.json`:
+Model ids can live in `config.json` or in the client's environment. Do not put a TypeSafe API key in a config file that you commit. For Jev, set `TYPESAFE_API_KEY` in that client's environment, or use the keychain commands above.
+
+**Claude Code**
+
+```bash
+claude mcp add agiw -- agiw-mcp
+```
+
+With the model settings in the environment:
+
+```bash
+claude mcp add agiw -e AGIW_MCP_AUTHOR_MODEL=your-author-model-id \
+  -e AGIW_MCP_REVIEWER_MODEL=your-reviewer-model-id -- agiw-mcp
+```
+
+**Claude Desktop**
+
+Settings, Developer, Edit Config opens `claude_desktop_config.json`. The [MCP local-server guide](https://modelcontextprotocol.io/docs/2025-11-25/develop/connect-local-servers) gives these paths:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Quit Claude Desktop completely and start it again after saving. Closing the window leaves the process running.
+
+```json
+{
+  "mcpServers": {
+    "agiw": {
+      "command": "agiw-mcp",
+      "args": [],
+      "env": {
+        "AGIW_MCP_AUTHOR_MODEL": "your-author-model-id",
+        "AGIW_MCP_REVIEWER_MODEL": "your-reviewer-model-id"
+      }
+    }
+  }
+}
+```
+
+**Cursor**
+
+Project config is `.cursor/mcp.json`. Config for every project on the machine is `~/.cursor/mcp.json`. When both name `agiw`, Cursor uses the project entry. The stdio fields in Cursor's MCP docs include `type`; this snippet sets it to `stdio`. Save the file and reload MCP.
+
+```json
+{
+  "mcpServers": {
+    "agiw": {
+      "type": "stdio",
+      "command": "agiw-mcp",
+      "args": [],
+      "env": {
+        "AGIW_MCP_AUTHOR_MODEL": "your-author-model-id",
+        "AGIW_MCP_REVIEWER_MODEL": "your-reviewer-model-id"
+      }
+    }
+  }
+}
+```
+
+**Factory**
+
+```bash
+droid mcp add agiw agiw-mcp
+```
+
+or `~/.factory/mcp.json`:
 
 ```json
 {
@@ -155,7 +222,7 @@ Claude Code can register it with `claude mcp add agiw -- agiw-mcp`. Factory can 
 }
 ```
 
-OpenCode (`opencode.json` or `opencode.jsonc`):
+**OpenCode** (`opencode.json` or `opencode.jsonc`):
 
 ```json
 {
@@ -165,7 +232,7 @@ OpenCode (`opencode.json` or `opencode.jsonc`):
 }
 ```
 
-This repository's tests do not start those clients.
+This repository's tests do not start Claude Desktop, Cursor, Claude Code, Factory or OpenCode.
 
 ### Nisi arguments and limits
 

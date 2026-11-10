@@ -6,6 +6,10 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ## [Unreleased]
 
+### Documentation
+
+- README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
+
 ### This change
 
 - Rewrite the README as a landing page: pitch, the install and readiness commands that were run, how readiness, consent-gated Jev and Nisi work, and an honest status. Badges are CI, Apache-2.0 and Python 3.10+.
