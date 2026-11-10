@@ -10,15 +10,15 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
 - Use US spellings in the README, contributing notes, and provenance (`license`, `behavior`). The Claude Desktop section says the local-server guide lists macOS and Windows paths and does not list a Linux path.
+- Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
 
 ### Packaging
 
 - Discover `agiw_mcp` namespace packages so a build no longer warns that the vendored Nisi directories would be ignored. The installed files are unchanged.
 
-### This change
+### README and distribution
 
 - Rewrite the README as a landing page: pitch, the install and readiness commands that were run, how readiness, consent-gated Jev and Nisi work, and an honest status. Badges are CI, Apache-2.0 and Python 3.10+.
-- Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
 - Add [CONTRIBUTING.md](CONTRIBUTING.md). [SECURITY.md](SECURITY.md) was already present.
 - Include `tests/support.py` and `scripts/` in the sdist. Distutils was adding `tests/test*.py` and omitting the helper those tests import. The wheel already contained the installed package.
 - CI installs this commit with `uv tool install git+https://...@<sha>`, checks `--version`, and speaks MCP initialize and `tools/list`.
