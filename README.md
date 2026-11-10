@@ -6,7 +6,7 @@
 
 AGIW MCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server: a readiness check for this machine, optional consent-gated questions to TypeSafe's Jev model, and one Nisi run on file contents you supply.
 
-**Status:** the `v0.1.0` tag and current main both report version `0.1.0`. Python 3.10 or newer. Node.js 22 or newer when a Nisi run needs it. macOS and Linux are in CI. Apache-2.0. Not published to PyPI.
+**Status:** the `v0.1.0` tag and current main both report version `0.1.0`. Python 3.10 or newer. Node.js 22 or newer when a Nisi run needs it. CI runs on macOS, Linux, and Windows. Apache-2.0. Not published to PyPI.
 
 ## Quick start
 
@@ -61,7 +61,7 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 
 - Install from a checkout with `pipx install .` or `uv tool install .`, and from git with `main` or `v0.1.0`.
 - `agiw-mcp --version`, `agiw-mcp readiness`, and the stdio initialize / `tools/list` handshake.
-- The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24.
+- The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
 - Vendored Nisi v0.2.0, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text.
 
@@ -69,7 +69,7 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 
 - A release newer than `v0.1.0`. Main has later fixes and still reports `0.1.0`.
 - PyPI. Install from git or from a checkout.
-- Windows in CI. Ticket admission is refused on Windows (`TICKET_UNSUPPORTED_PLATFORM`) before it touches the ticket directory. Runs without a ticket still work there unless `require_ticket` is true.
+- Ticket admission on Windows. CI runs the other unit tests there. Admission is still refused (`TICKET_UNSUPPORTED_PLATFORM`) before the ticket directory is touched. Runs without a ticket still work there unless `require_ticket` is true.
 - Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
 - OpenCode protocol `2026-07-28` is not implemented. OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is the one this server answers.
 - A live request to TypeSafe is not part of the tests. `agiw_jev_pre` and `agiw_jev_post` refuse until consent is recorded and a key is available. CI uses a local fake for the success path.

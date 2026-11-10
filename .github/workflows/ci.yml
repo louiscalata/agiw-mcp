@@ -160,6 +160,29 @@ jobs:
             '.result.tools | map(.name) == $expected' "$RUNNER_TEMP/tools.json"
           "$UV_TOOL_DIR/agiw-mcp/bin/python" -I "$GITHUB_WORKSPACE/scripts/installed_smoke.py"
 
+  windows:
+    name: Python 3.12 / Node 22 / windows-latest
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Scrub check
+        run: python scripts/scrub_check.py
+      - name: Compile
+        run: python -m compileall -q src
+      - name: Unit tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -B -m unittest discover -s tests -v
+
   suite-compat:
     name: AGIW Suite main
     runs-on: ubuntu-latest

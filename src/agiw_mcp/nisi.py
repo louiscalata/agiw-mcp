@@ -166,10 +166,24 @@ def _probe_env() -> dict:
     return env
 
 
+def _windows_node_exe(path: str) -> str:
+    """Use node.exe beside a .cmd or .bat shim. CreateProcess cannot start those shims."""
+    if os.name != "nt":
+        return path
+    root, ext = os.path.splitext(path)
+    if ext.lower() not in {".cmd", ".bat"}:
+        return path
+    exe = root + ".exe"
+    if not os.path.isfile(exe):
+        exe = os.path.join(os.path.dirname(path), "node.exe")
+    return exe if os.path.isfile(exe) else path
+
+
 def find_node() -> tuple[str | None, tuple[int, int, int] | None]:
     path = shutil.which("node")
     if not path:
         return None, None
+    path = _windows_node_exe(path)
     try:
         done = subprocess.run([path, "--version"], stdin=subprocess.DEVNULL, capture_output=True,
                               timeout=3, check=False, env=_probe_env())
@@ -211,7 +225,9 @@ def permission_flags(node: str, workdir: str) -> tuple[list[str], str]:
     base = _FLAG_CACHE[node]
     if base is None:
         return [], "none"
-    return base + [f"--allow-fs-read={workdir}", f"--allow-fs-write={workdir}", "--allow-child-process"], \
+    # Node's Windows permission parser has treated `\` as an escape. `/` names the same path.
+    allow = workdir.replace("\\", "/") if os.name == "nt" else workdir
+    return base + [f"--allow-fs-read={allow}", f"--allow-fs-write={allow}", "--allow-child-process"], \
         "node-permission"
 
 
@@ -326,8 +342,8 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 
 def _bounded_run(argv: list[str], *, data: bytes, cwd: str, env: dict, timeout: float) -> tuple[int | None, bytes, str]:
     """Run a child with capped output and a wall-clock limit. Returns (code, stdout, state)."""
-    extra = {"start_new_session": True} if os.name == "posix" else {
-        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    # CREATE_NEW_PROCESS_GROUP can make CreateProcess fail on Windows, and the kill path does not use it.
+    extra = {"start_new_session": True} if os.name == "posix" else {}
     if _cancelled():
         raise ToolError("NISI_CANCELLED", "The Nisi request was cancelled.")
     proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -411,9 +427,14 @@ def _child_env(node: str, workdir: str) -> dict:
     env = {"PATH": os.pathsep.join(path_dirs), "HOME": workdir, "TMPDIR": workdir, "TMP": workdir,
            "TEMP": workdir, "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"}
     if os.name == "nt":  # Node cannot start on Windows without these; nothing else needs them
-        for name in ("SYSTEMROOT", "WINDIR"):
-            if os.environ.get(name):
-                env[name] = os.environ[name]
+        for canonical in _PROBE_WINDOWS_NAMES:
+            if os.environ.get(canonical):
+                env[canonical] = os.environ[canonical]
+                continue
+            for key, value in os.environ.items():
+                if key.upper() == canonical.upper() and value:
+                    env[canonical] = value
+                    break
     return env
 
 

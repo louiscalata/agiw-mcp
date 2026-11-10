@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+import unittest
 from unittest import mock
 
 from support import SRC, IsolatedTestCase, subprocess_env
@@ -15,6 +16,10 @@ from agiw_mcp import tickets
 from agiw_mcp.errors import ToolError
 
 
+@unittest.skipIf(
+    sys.platform == "win32",
+    "ticket admission is refused on Windows before the ticket directory is touched",
+)
 class StaleLockTests(IsolatedTestCase):
     def setUp(self):
         super().setUp()

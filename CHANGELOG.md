@@ -17,6 +17,10 @@ until a release is assigned. Entries under Unreleased are not a new release.
 - Use US spellings in the README, contributing notes, and provenance (`license`, `behavior`). The Claude Desktop section says the local-server guide lists macOS and Windows paths and does not list a Linux path.
 - Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
 
+### Tests
+
+- Windows CI runs the scrub check, compile, and unit tests on Python 3.12 and Node 22. Ticket-admission tests are skipped there because admission is refused before the ticket directory is touched.
+
 ### Packaging
 
 - Discover `agiw_mcp` namespace packages so a build no longer warns that the vendored Nisi directories would be ignored. The installed files are unchanged.
