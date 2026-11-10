@@ -174,12 +174,13 @@ Remove it with `claude mcp remove agiw`.
 
 **Claude Desktop**
 
-Settings, Developer, Edit Config opens `claude_desktop_config.json`. The [MCP local-server guide](https://modelcontextprotocol.io/docs/2025-11-25/develop/connect-local-servers) gives these paths:
+Settings, Developer, Edit Config opens `claude_desktop_config.json`. The current [MCP local-server guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers) lists these paths:
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
 
-That guide says Claude Desktop is also available for Linux. It does not list a Linux path. Edit Config still opens the file.
+The 2025-11-25 snapshot of that guide lists macOS and Windows only. Edit Config still opens the file.
 
 Quit Claude Desktop completely and start it again after saving. Closing the window leaves the process running.
 
@@ -200,7 +201,7 @@ Quit Claude Desktop completely and start it again after saving. Closing the wind
 
 **Cursor**
 
-Project config is `.cursor/mcp.json`. Config for every project on the machine is `~/.cursor/mcp.json`. When both name `agiw`, Cursor uses the project entry. The stdio fields in Cursor's MCP docs include `type`; this snippet sets it to `stdio`. Save the file and reload MCP.
+Project config is `.cursor/mcp.json`. Config for every project on the machine is `~/.cursor/mcp.json`. When both name `agiw`, Cursor uses the project entry. The stdio fields in Cursor's MCP docs include `type`; this snippet sets it to `stdio`. Save the file and restart Cursor.
 
 ```json
 {
