@@ -71,6 +71,17 @@ class RpcTests(IsolatedTestCase):
             self.assertEqual(reply["result"]["protocolVersion"], version)
             self.assertNotIn("resultType", reply["result"])
 
+    def test_tools_list_rejects_a_cursor(self):
+        for cursor in ("next", "", 0, None):
+            with self.subTest(cursor=cursor):
+                reply = exchange(frame({"jsonrpc": "2.0", "id": 1, "method": "tools/list",
+                                        "params": {"cursor": cursor}}))[0]
+                self.assertEqual(reply["error"]["code"], -32602)
+                self.assertIsNone(reply["error"].get("data"))
+        listed = exchange(frame({"jsonrpc": "2.0", "id": 2, "method": "tools/list",
+                                 "params": {"_meta": {}}}))[0]
+        self.assertEqual(len(listed["result"]["tools"]), 6)
+
     def test_unknown_protocol_version_gets_latest(self):
         message = dict(INIT, params={"protocolVersion": "1999-01-01"})
         reply = exchange(frame(message))[0]

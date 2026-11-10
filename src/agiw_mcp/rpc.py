@@ -117,7 +117,8 @@ def handle(message):
     if method == "ping":
         return _ok(identifier, {})
     if method == "tools/list":
-        if set(params) - {"cursor", "_meta"}:
+        if set(params) - {"cursor", "_meta"} or "cursor" in params:
+            # This server returns every tool in one page, so any cursor is invalid.
             return _error(identifier, INVALID_PARAMS, "Invalid params")
         return _ok(identifier, {"tools": TOOLS})
     if method == "tools/call":
