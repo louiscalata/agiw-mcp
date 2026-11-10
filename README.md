@@ -1,7 +1,7 @@
 # AGIW MCP
 
 [![CI](https://github.com/louiscalata/agiw-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/louiscalata/agiw-mcp/actions/workflows/ci.yml)
-[![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-informational)
 
 AGIW MCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server: a readiness check for this machine, optional consent-gated questions to TypeSafe's Jev model, and one Nisi run on file contents you supply.
@@ -179,6 +179,8 @@ Settings, Developer, Edit Config opens `claude_desktop_config.json`. The [MCP lo
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
+That guide says Claude Desktop is also available for Linux. It does not list a Linux path. Edit Config still opens the file.
+
 Quit Claude Desktop completely and start it again after saving. Closing the window leaves the process running.
 
 ```json
@@ -313,7 +315,7 @@ After `agiw-mcp` is on `PATH`:
 python3 scripts/stdio_handshake.py agiw-mcp
 ```
 
-## Security and licence
+## Security and license
 
 What is sent, consent, the Nisi sandbox and how to report a vulnerability: [SECURITY.md](SECURITY.md).
 

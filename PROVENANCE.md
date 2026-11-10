@@ -41,7 +41,7 @@ and of every listed file before each run.
 
 ## Referenced, not copied
 
-These sources were read to match existing behaviour. No text or code from them
+These sources were read to match existing behavior. No text or code from them
 is included; the corresponding modules here are new implementations.
 
 - agiw-suite `nisi_v02.py` and `bundle_nisi.py` (bounded child processes,
