@@ -6,10 +6,14 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ## [Unreleased]
 
+### Documentation
+
+- README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
+
 ### This change
 
 - Rewrite the README as a landing page: pitch, the install and readiness commands that were run, how readiness, consent-gated Jev and Nisi work, and an honest status. Badges are CI, Apache-2.0 and Python 3.10+.
-- Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Cursor `.cursor/mcp.json` block, the Linux `secret-tool store` command, and the Claude Code `-e` example. State that OpenCode protocol `2026-07-28` is not implemented.
+- Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
 - Add [CONTRIBUTING.md](CONTRIBUTING.md). [SECURITY.md](SECURITY.md) was already present.
 - Include `tests/support.py` and `scripts/` in the sdist. Distutils was adding `tests/test*.py` and omitting the helper those tests import. The wheel already contained the installed package.
 - CI installs this commit with `uv tool install git+https://...@<sha>`, checks `--version`, and speaks MCP initialize and `tools/list`.
