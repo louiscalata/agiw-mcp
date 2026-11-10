@@ -9,6 +9,7 @@ until a release is assigned. Entries under Unreleased are not a new release.
 ### Documentation
 
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
+- Use US spellings in the README, contributing notes, and provenance (`license`, `behavior`). The Claude Desktop section says the local-server guide lists macOS and Windows paths and does not list a Linux path.
 
 ### Packaging
 

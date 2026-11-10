@@ -26,4 +26,4 @@ A pull request that changes install or the MCP entry point should say which inst
 
 Windows is not in CI. Ticket admission is disabled there. Say so if your change touches it.
 
-Apache-2.0. A contribution is under that licence. Third-party material needs its origin and the attribution it requires. See [PROVENANCE.md](PROVENANCE.md) for the files copied from AGIW Suite and Nisi.
+Apache-2.0. A contribution is under that license. Third-party material needs its origin and the attribution it requires. See [PROVENANCE.md](PROVENANCE.md) for the files copied from AGIW Suite and Nisi.
