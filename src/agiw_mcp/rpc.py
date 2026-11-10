@@ -22,6 +22,7 @@ from .tools import TOOL_NAMES, TOOLS, call_tool
 
 MAX_LINE_BYTES = 4 * 1024 * 1024
 MAX_OUTPUT_BYTES = 16 * 1024 * 1024
+# Legacy initialize handshake. Newest first. 2026-07-28 is not in this list.
 SUPPORTED_PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
     "AGIW MCP. When the user says \"initiate online code mode\" with no task, call agiw_readiness and report READY "

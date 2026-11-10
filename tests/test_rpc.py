@@ -63,6 +63,14 @@ class RpcTests(IsolatedTestCase):
         self.assertFalse(call["result"]["isError"])
         self.assertEqual(json.loads(call["result"]["content"][0]["text"]), call["result"]["structuredContent"])
 
+    def test_accepted_legacy_versions_are_negotiated(self):
+        self.assertEqual(rpc.SUPPORTED_PROTOCOLS, ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"))
+        for version in ("2025-11-25", "2025-06-18"):
+            params = {"protocolVersion": version, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}
+            reply = exchange(frame({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": params}))[0]
+            self.assertEqual(reply["result"]["protocolVersion"], version)
+            self.assertNotIn("resultType", reply["result"])
+
     def test_unknown_protocol_version_gets_latest(self):
         message = dict(INIT, params={"protocolVersion": "1999-01-01"})
         reply = exchange(frame(message))[0]

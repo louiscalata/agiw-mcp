@@ -41,6 +41,8 @@ The JSON has `"status": "NOT_READY"` and `"missing": {"id": "models", ...}`. Wit
 
 With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize request for protocol `2025-03-26`, then `tools/list`, returned server `agiw-mcp` `0.1.0` and these tools: `agiw_readiness`, `agiw_status`, `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, `agiw_nisi_run`.
 
+The legacy `initialize` handshake accepts `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
+
 Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are in [Client setup](#client-setup).
 
 ## How it works
