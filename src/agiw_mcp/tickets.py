@@ -30,10 +30,15 @@ effective user with mode 0700. Anything else fails closed. The descriptor of
 the state directory is kept for each admitted ticket and its locks are
 released through it, so a registry renamed or replaced in the meantime is
 never touched. Any failure, including a failed write or close of a lock file,
-removes the files this call created. Locks with a confirmed dead local owner
+removes the lock files this call created. The per-install identity key stays.
+Locks with a confirmed dead local owner
 are reclaimed after 60 seconds, serialized on the candidate inode. Missing or
 unverifiable owner data remains fail-closed; live PIDs and foreign hosts are
-never reclaimed.
+never reclaimed. Host and process-start identities in a lock are HMAC-SHA256
+under a random per-install key (``identity.key``, mode 0600) in this directory.
+The key is never logged. Raw machine and boot identifiers are not written. A
+lock that stored them in the clear, or as an unkeyed SHA-256 of a public
+prefix, does not match and is not reclaimed.
 
 On Windows admission is refused (TICKET_UNSUPPORTED_PLATFORM) before the filesystem
 is touched: there is no reparse-point,
@@ -47,11 +52,13 @@ from __future__ import annotations
 import ctypes
 import errno
 import hashlib
+import hmac
 import json
 import logging
 import os
 from pathlib import Path
 import re
+import secrets
 import stat
 import sys
 import threading
@@ -323,14 +330,116 @@ def _at(root: Path, dir_fd: int | None, name: str) -> tuple[str, dict]:
     return (name, {"dir_fd": dir_fd}) if dir_fd is not None else (str(root / name), {})
 
 
-def _host_identity() -> str | None:
-    """Stable machine identity, with Linux PID namespace isolation; never use hostname alone."""
+# Domain separator inside the HMAC message. It is not a key.
+_LOCK_IDENTITY_PREFIX = b"agiw-mcp.lock-identity.v1\0"
+_LOCK_IDENTITY_SECRET_NAME = "identity.key"
+_LOCK_IDENTITY_SECRET_LEN = 32
+
+
+def _digest_identity(text: str, secret: bytes) -> str:
+    """HMAC-SHA256 of a lock identity. The raw machine id and boot id are not stored.
+
+    The same text under a different per-install ``secret`` does not match, so a lock cannot confirm
+    a guessed id or be linked to another install."""
+    return hmac.new(secret, _LOCK_IDENTITY_PREFIX + text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _secret_mode_ok(info: os.stat_result) -> bool:
+    return (stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid() and info.st_nlink == 1
+            and stat.S_IMODE(info.st_mode) == 0o600 and info.st_size == _LOCK_IDENTITY_SECRET_LEN)
+
+
+def _read_identity_secret(root: Path, dir_fd: int | None) -> bytes | None:
+    """Read the per-install key. None unless it is a private 32-byte file with no other links. Never log it."""
+    target, at = _at(root, dir_fd, _LOCK_IDENTITY_SECRET_NAME)
+    try:
+        fd = os.open(target, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), **at)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not _secret_mode_ok(info):
+            return None
+        data = os.read(fd, _LOCK_IDENTITY_SECRET_LEN + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    if len(data) != _LOCK_IDENTITY_SECRET_LEN:
+        return None
+    return data
+
+
+def _identity_secret(root: Path, dir_fd: int | None) -> bytes | None:
+    """Random per-install HMAC key in the state directory, created mode 0600.
+
+    The name appears only after the bytes are synced, so a reader never sees a partial key. The key
+    is never logged. A file that is not mode 0600, not owned by this user, or linked elsewhere is
+    ignored and locks stay unreclaimed."""
+    current = _read_identity_secret(root, dir_fd)
+    if current is not None:
+        return current
+    tmp = ".identity.key." + secrets.token_hex(8)
+    target, at = _at(root, dir_fd, tmp)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(target, flags, 0o600, **at)
+    except OSError:
+        return _read_identity_secret(root, dir_fd)
+    secret: bytes | None = None
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        secret = secrets.token_bytes(_LOCK_IDENTITY_SECRET_LEN)
+        view = memoryview(secret)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError(errno.EIO, "identity secret write made no progress")
+            view = view[written:]
+        os.fsync(fd)
+        if not _secret_mode_ok(os.fstat(fd)):
+            secret = None
+    except OSError:
+        secret = None
+    finally:
+        os.close(fd)
+    if secret is None:
+        _unlink(root, dir_fd, tmp)
+        return None
+    final = _LOCK_IDENTITY_SECRET_NAME
+    try:
+        if dir_fd is not None:
+            os.link(tmp, final, src_dir_fd=dir_fd, dst_dir_fd=dir_fd, follow_symlinks=False)
+        else:
+            os.link(root / tmp, root / final, follow_symlinks=False)
+    except FileExistsError:
+        _unlink(root, dir_fd, tmp)
+        return _read_identity_secret(root, dir_fd)
+    except OSError:
+        _unlink(root, dir_fd, tmp)
+        return None
+    _unlink(root, dir_fd, tmp)
+    published = _read_identity_secret(root, dir_fd)
+    if published is None or not hmac.compare_digest(published, secret):
+        return None
+    return published
+
+
+def _host_identity(secret: bytes | None) -> str | None:
+    """Stable machine identity, with Linux PID namespace isolation; never use hostname alone.
+
+    The returned value is an HMAC-SHA256 under ``secret``. The same machine and the same key still
+    compare equal. A lock written with the raw identity, or with an unkeyed SHA-256, does not match
+    and stays unreclaimed."""
+    if not isinstance(secret, bytes) or not secret:
+        return None
     try:
         if sys.platform.startswith("linux"):
             machine = Path("/etc/machine-id").read_text(encoding="ascii").strip()
             namespace = os.readlink("/proc/self/ns/pid")
             if re.fullmatch(r"[0-9a-fA-F]{32}", machine):
-                return "linux:" + machine.lower() + ":" + namespace
+                return _digest_identity("linux:" + machine.lower() + ":" + namespace, secret)
         elif sys.platform == "darwin":
             class Timespec(ctypes.Structure):
                 _fields_ = [("seconds", ctypes.c_long), ("nanoseconds", ctypes.c_long)]
@@ -340,20 +449,22 @@ def _host_identity() -> str | None:
             gethostuuid.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(Timespec)]
             gethostuuid.restype = ctypes.c_int
             if gethostuuid(value, ctypes.byref(Timespec(1, 0))) == 0 and any(value):
-                return "darwin:" + bytes(value).hex()
+                return _digest_identity("darwin:" + bytes(value).hex(), secret)
     except (OSError, ValueError, AttributeError):
         pass
     return None
 
 
-def _process_start(pid: int) -> str | None:
+def _process_start(pid: int, secret: bytes | None) -> str | None:
     """Best-effort start identity; failure is never evidence of process death."""
+    if not isinstance(secret, bytes) or not secret:
+        return None
     try:
         if sys.platform.startswith("linux"):
             # comm may contain spaces and parentheses; starttime is field 22.
             fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
             boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-            return boot + ":" + fields[19]
+            return _digest_identity(boot + ":" + fields[19], secret)
         if sys.platform == "darwin":
             # Darwin sys/proc_info.h: PROC_PIDTBSDINFO (3), struct proc_bsdinfo.
             class ProcBSDInfo(ctypes.Structure):
@@ -368,23 +479,24 @@ def _process_start(pid: int) -> str | None:
             proc_pidinfo.restype = ctypes.c_int
             size = ctypes.sizeof(info)
             if proc_pidinfo(pid, 3, 0, ctypes.byref(info), size) == size:
-                return f"{info.start_sec}:{info.start_usec}"
+                return _digest_identity(f"{info.start_sec}:{info.start_usec}", secret)
     except (OSError, ValueError, IndexError, AttributeError):
         pass
     return None
 
 
-def _lock_owner() -> dict:
-    return {"host": _host_identity(), "pid": os.getpid(), "startTime": _process_start(os.getpid()),
+def _lock_owner(root: Path, dir_fd: int | None) -> dict:
+    secret = _identity_secret(root, dir_fd)
+    return {"host": _host_identity(secret), "pid": os.getpid(), "startTime": _process_start(os.getpid(), secret),
             "createdAt": time.time()}
 
 
-def _dead_owner(record: dict, info: os.stat_result) -> bool:
+def _dead_owner(record: dict, info: os.stat_result, secret: bytes | None) -> bool:
     owner = record.get("processOwner")
     if not isinstance(owner, dict):
         return False
     pid, created = owner.get("pid"), owner.get("createdAt")
-    host = _host_identity()
+    host = _host_identity(secret)
     if (not host or owner.get("host") != host or type(pid) is not int or not 0 < pid <= 2147483647
             or type(created) not in (int, float) or not 0 < created <= time.time()):
         return False
@@ -395,7 +507,7 @@ def _dead_owner(record: dict, info: os.stat_result) -> bool:
     if recorded_start is not None:
         if not isinstance(recorded_start, str) or not recorded_start:
             return False
-        if _process_start(pid) == recorded_start:
+        if _process_start(pid, secret) == recorded_start:
             return False
     try:
         os.kill(pid, 0)
@@ -430,13 +542,14 @@ def _reclaim_stale(root: Path, dir_fd: int | None, name: str) -> bool:
         if len(data) > MAX_LOCK_BYTES:
             return False
         record = json.loads(data.decode("utf-8"))
-        if not isinstance(record, dict) or not _dead_owner(record, info):
+        secret = _identity_secret(root, dir_fd)
+        if not isinstance(record, dict) or not _dead_owner(record, info, secret):
             return False
         current = os.stat(target, follow_symlinks=False, **at)
         if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
             return False
         os.unlink(target, **at)
-        # No scope, user-supplied owner, host identifier or arbitrary filename in the receipt.
+        # No scope, user-supplied owner, host identifier, identity key, or arbitrary filename.
         kind = "admission" if name == ADMIT_LOCK else "scope"
         _LOG.warning("TICKET_LOCK_RECLAIMED kind=%s pid=%d reason=dead_local_owner age_seconds=%d",
                      kind, record["processOwner"]["pid"], int(time.time() - info.st_mtime))
@@ -527,7 +640,7 @@ class Registry:
 
     def _acquire_admission(self, dir_fd: int | None, ticket_id: str) -> None:
         deadline = time.monotonic() + ADMIT_WAIT_SECONDS
-        data = json.dumps({"processOwner": _lock_owner()}).encode("utf-8")
+        data = json.dumps({"processOwner": _lock_owner(self.root, dir_fd)}).encode("utf-8")
         while True:
             try:
                 _create_exclusive(self.root, dir_fd, ADMIT_LOCK, data)
@@ -579,7 +692,7 @@ class Registry:
                 if holder == ticket_id or any(overlaps(scope_key, key) for key in clean["writeScope"]):
                     raise ToolError("TICKET_SCOPE_CONFLICT", "The ticket's write scope overlaps a ticket "
                                     "that is already admitted; nothing was admitted.", ticketId=ticket_id)
-            process_owner = _lock_owner()
+            process_owner = _lock_owner(self.root, dir_fd)
             for key in clean["writeScope"]:
                 name = _scope_name(key)
                 data = json.dumps({"scope": key, "ticketId": ticket_id, "owner": clean["owner"],

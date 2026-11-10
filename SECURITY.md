@@ -138,18 +138,33 @@ was truncated, the outcome code, HTTP status, number of flags and elapsed
 milliseconds (`elapsedMs`). It never contains the text or the key. New logs are
 created with mode 0600 on macOS and Linux; an existing log keeps its mode.
 Nisi runs have no per-call log; ticket admission state is
-stored separately. Admission and scope lock records include machine identity, PID, optional process
-start identity and creation time. Recovery requires matching local machine/PID-namespace identity,
+stored separately. Admission and scope lock records include an HMAC-SHA256 of the machine identity,
+PID, an optional HMAC-SHA256 of the process start identity, and creation time. The machine identity is
+Linux `/etc/machine-id` plus the PID namespace, or the macOS host UUID from `gethostuuid`. The start
+identity is the Linux boot id plus the process start time from `/proc/<pid>/stat`, or the macOS
+process start time. Neither raw value is written. The HMAC key is 32 random bytes stored in the
+ticket state directory as `identity.key`, created on first use with mode 0600. It is never logged
+and must not be committed. The same install reuses that file, so the same machine and the same
+process start still compare equal. A different key produces a different digest, which stops a lock
+from being linked to another install or confirming a guessed machine id or boot id. The HMAC message
+is prefixed with `agiw-mcp.lock-identity.v1` only to keep a machine digest distinct from a boot
+digest; that prefix is not a secret. A key file that is missing, the wrong size, linked elsewhere,
+or not mode 0600 is ignored, and recovery stays fail-closed.
+A lock written by an older version, which stored those values in the clear, does not match and is
+not reclaimed. A lock written with the unkeyed SHA-256 of that public prefix also does not match
+and is not reclaimed. Remove either by hand only after the owning process is confirmed dead.
+Recovery requires matching the local machine/PID-namespace HMAC,
 a minimum age of 60 seconds in both metadata and filesystem mtime, and a PID probe confirming
 that the process does not exist. A recorded start identity is checked; a live or unverifiable PID
 is never reclaimed, even after PID reuse. Foreign, legacy, partial or malformed records remain
 fail-closed. Recovery serializes reclaimers with `flock` on the candidate inode and checks pathname
 identity before unlinking through the verified directory descriptor. Symlinks, hardlinked candidates
 and files owned by another user are not reclaimed. This relies on reliable POSIX advisory locking,
-unique machine identities and the existing private-directory trust boundary; same-user manual
-replacement of lock files during recovery is outside that boundary.
+unique machine identities, the identity key staying mode 0600, and the existing private-directory
+trust boundary; same-user manual replacement of lock files during recovery is outside that boundary.
 
 Successful recovery emits a `TICKET_LOCK_RECLAIMED` warning through Python logging (stderr by
-default), with lock kind, PID, reason and age. It omits owner text, host identifiers and scope paths.
+default), with lock kind, PID, reason and age. It omits owner text, host identifiers, the identity
+key and scope paths.
 Recovery is demand-driven by a later admission, not a background service; incomplete lock writes
 still require manual cleanup after all active runs have been ruled out.
