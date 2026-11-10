@@ -154,6 +154,10 @@ jobs:
           uv tool install "$url"
           "$UV_TOOL_BIN_DIR/agiw-mcp" --version
           python3 scripts/stdio_handshake.py "$UV_TOOL_BIN_DIR/agiw-mcp"
+          npx --yes @modelcontextprotocol/inspector@2.14.0 --cli "$UV_TOOL_BIN_DIR/agiw-mcp" \
+            --method tools/list --format json > "$RUNNER_TEMP/tools.json"
+          jq -e --argjson expected '["agiw_readiness","agiw_status","agiw_consent","agiw_jev_pre","agiw_jev_post","agiw_nisi_run"]' \
+            '.result.tools | map(.name) == $expected' "$RUNNER_TEMP/tools.json"
           "$UV_TOOL_DIR/agiw-mcp/bin/python" -I "$GITHUB_WORKSPACE/scripts/installed_smoke.py"
 
   suite-compat:

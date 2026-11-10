@@ -10,6 +10,10 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 - `docs/release-notes/next.md` lists each merged pull request after `v0.1.0` in one sentence, plus what was not verified. The version stays `0.1.0`.
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
+
+### Tests
+
+- The git-install CI job lists tools with MCP Inspector 2.14.0. It does not call Jev or a model.
 - Use US spellings in the README, contributing notes, and provenance (`license`, `behavior`). The Claude Desktop section says the local-server guide lists macOS and Windows paths and does not list a Linux path.
 - Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
 
