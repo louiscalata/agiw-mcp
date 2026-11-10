@@ -71,6 +71,8 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 - PyPI. Install from git or from a checkout.
 - Windows in CI. Ticket admission is refused on Windows (`TICKET_UNSUPPORTED_PLATFORM`) before it touches the ticket directory. Runs without a ticket still work there unless `require_ticket` is true.
 - Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
+- OpenCode protocol `2026-07-28` is not implemented. OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is the one this server answers.
+- A live request to TypeSafe is not part of the tests. `agiw_jev_pre` and `agiw_jev_post` refuse until consent is recorded and a key is available. CI uses a local fake for the success path.
 - Granting consent is not an OS user-presence check. Any same-user process that can write the config directory can change `consent.json`.
 - `COMPLETED` does not apply files. You do that yourself, after reading the proposal.
 
@@ -133,7 +135,13 @@ The key is never stored in a plain file. Lookup order:
    security add-generic-password -s agiw-mcp -a typesafe -w
    ```
 
-3. Linux Secret Service (`secret-tool`). On Windows, use the environment variable.
+3. Linux Secret Service. Type the key at the prompt:
+
+   ```bash
+   secret-tool store --label='agiw-mcp TypeSafe' service agiw-mcp account typesafe
+   ```
+
+   On Windows, use `TYPESAFE_API_KEY`.
 
 ```bash
 agiw-mcp consent show
@@ -155,12 +163,14 @@ Model ids can live in `config.json` or in the client's environment. Do not put a
 claude mcp add agiw -- agiw-mcp
 ```
 
-With the model settings in the environment:
+With the model settings in the environment (`-e` and `--env` are the same flag; put them after the name and before `--`):
 
 ```bash
 claude mcp add agiw -e AGIW_MCP_AUTHOR_MODEL=your-author-model-id \
   -e AGIW_MCP_REVIEWER_MODEL=your-reviewer-model-id -- agiw-mcp
 ```
+
+Remove it with `claude mcp remove agiw`.
 
 **Claude Desktop**
 
@@ -208,11 +218,11 @@ Project config is `.cursor/mcp.json`. Config for every project on the machine is
 
 **Factory**
 
+`droid mcp add` writes `~/.factory/mcp.json`. `--type` defaults to `stdio`. A project copy is `.factory/mcp.json`.
+
 ```bash
 droid mcp add agiw agiw-mcp
 ```
-
-or `~/.factory/mcp.json`:
 
 ```json
 {
@@ -222,13 +232,33 @@ or `~/.factory/mcp.json`:
 }
 ```
 
-**OpenCode** (`opencode.json` or `opencode.jsonc`):
+**OpenCode.** Current config puts each server under `mcp.servers` in `opencode.json` or `opencode.jsonc`. `type` is `local` and `command` is an array. `codemode` defaults to true; `false` leaves these six tools on the native tool list. `protocol` defaults to `legacy`, which uses `initialize` through `2025-11-25`.
+
+```bash
+opencode mcp add agiw -- agiw-mcp
+```
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "agiw": { "type": "local", "command": ["agiw-mcp"], "enabled": true }
+    "servers": {
+      "agiw": {
+        "type": "local",
+        "command": ["agiw-mcp"],
+        "codemode": false
+      }
+    }
   }
+}
+```
+
+Model ids from the process environment use `environment` and `{env:NAME}`:
+
+```json
+"environment": {
+  "AGIW_MCP_AUTHOR_MODEL": "{env:AGIW_MCP_AUTHOR_MODEL}",
+  "AGIW_MCP_REVIEWER_MODEL": "{env:AGIW_MCP_REVIEWER_MODEL}"
 }
 ```
 
