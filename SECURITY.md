@@ -26,6 +26,19 @@ the caller's deadline; at most two HTTP workers may remain outstanding per proce
 and further calls fail rather than accumulating workers. A failed or timed-out Jev
 exchange may already have sent its request. There is no automatic retry.
 
+## MCP security practices
+
+These rows follow the [MCP security best practices](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices). "Does not apply" means this server does not implement the feature that practice is about.
+
+| Practice | Applies | What this server does |
+|---|---|---|
+| Confused deputy | Does not apply | There is no OAuth proxy, no third-party authorization server, and no remote MCP HTTP endpoint. The process speaks JSON-RPC on stdio (`src/agiw_mcp/rpc.py`). |
+| Token passthrough | Does not apply | The server does not accept an MCP access token from the client or forward one. The TypeSafe key is the user's own key, read after consent (`src/agiw_mcp/keys.py`, `src/agiw_mcp/jev.py`). Tests check that the key is not echoed (`tests/test_jev.py`). |
+| Server-side request forgery | Applies | Model URLs must be `http://127.0.0.1` or `http://[::1]` (`src/agiw_mcp/config.py`, `validate_loopback_base_url`). Other URLs are refused (`src/agiw_mcp/net.py`). The Jev URL is the fixed constant in `src/agiw_mcp/consent.py`, not a client-supplied address. `tests/test_keys_consent_config.py` covers the network guard. |
+| Session hijacking | Does not apply | stdio has no `Mcp-Session-Id` and no protocol session (`src/agiw_mcp/rpc.py`). A claim ticket is cooperative exclusion chosen by the caller, not authentication (`src/agiw_mcp/tickets.py`). |
+| Local MCP server compromise | Applies | The server runs as the user who starts it. Nisi returns proposed file contents and does not write the project (`src/agiw_mcp/nisi.py`). Consent is not an operating-system user-presence check: any same-user process that can write the config directory can change `consent.json`. The MCP tool cannot grant consent (`tests/test_cli.py`). |
+| Scope minimization | Does not apply | There is no OAuth scope list. The server exposes six fixed tools (`src/agiw_mcp/tools.py`). Jev runs only after recorded consent (`src/agiw_mcp/consent.py`). |
+
 ## Consent
 
 - Enforced by the server. `agiw_jev_pre` and `agiw_jev_post` refuse with
