@@ -254,7 +254,9 @@ class RegistryTests(IsolatedTestCase):
                 self.registry.admit(ticket("T-1", scope=("a", "b", "c", "d")))
         self.assertEqual(ctx.exception.code, "TICKET_REGISTRY_UNAVAILABLE", faults)
         self.assertEqual(ctx.exception.details, {"ticketId": "T-1"})
-        self.assertEqual(sorted(p.name for p in self.root.iterdir()), [], faults)
+        # identity.key is the per-install HMAC key, not a lock this admission created.
+        names = [p.name for p in self.root.iterdir() if p.name != tickets._LOCK_IDENTITY_SECRET_NAME]
+        self.assertEqual(sorted(names), [], faults)
         self.assertEqual(self.registry.admitted(), [])
         self.registry.admit(ticket("T-1", scope=("a", "b", "c", "d")))
         self.assertTrue(self.registry.release("T-1"))
