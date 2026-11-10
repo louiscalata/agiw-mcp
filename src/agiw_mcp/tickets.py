@@ -323,14 +323,26 @@ def _at(root: Path, dir_fd: int | None, name: str) -> tuple[str, dict]:
     return (name, {"dir_fd": dir_fd}) if dir_fd is not None else (str(root / name), {})
 
 
+# Domain separator so a hash of a machine id cannot be confused with a hash of a boot id.
+_LOCK_IDENTITY_PREFIX = b"agiw-mcp.lock-identity.v1\0"
+
+
+def _digest_identity(text: str) -> str:
+    """SHA-256 of a lock identity. The raw machine id and boot id are not stored."""
+    return hashlib.sha256(_LOCK_IDENTITY_PREFIX + text.encode("utf-8")).hexdigest()
+
+
 def _host_identity() -> str | None:
-    """Stable machine identity, with Linux PID namespace isolation; never use hostname alone."""
+    """Stable machine identity, with Linux PID namespace isolation; never use hostname alone.
+
+    The returned value is a SHA-256. The same machine still compares equal. A lock written with the
+    older raw identity does not match and stays unreclaimed."""
     try:
         if sys.platform.startswith("linux"):
             machine = Path("/etc/machine-id").read_text(encoding="ascii").strip()
             namespace = os.readlink("/proc/self/ns/pid")
             if re.fullmatch(r"[0-9a-fA-F]{32}", machine):
-                return "linux:" + machine.lower() + ":" + namespace
+                return _digest_identity("linux:" + machine.lower() + ":" + namespace)
         elif sys.platform == "darwin":
             class Timespec(ctypes.Structure):
                 _fields_ = [("seconds", ctypes.c_long), ("nanoseconds", ctypes.c_long)]
@@ -340,7 +352,7 @@ def _host_identity() -> str | None:
             gethostuuid.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(Timespec)]
             gethostuuid.restype = ctypes.c_int
             if gethostuuid(value, ctypes.byref(Timespec(1, 0))) == 0 and any(value):
-                return "darwin:" + bytes(value).hex()
+                return _digest_identity("darwin:" + bytes(value).hex())
     except (OSError, ValueError, AttributeError):
         pass
     return None
@@ -353,7 +365,7 @@ def _process_start(pid: int) -> str | None:
             # comm may contain spaces and parentheses; starttime is field 22.
             fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
             boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-            return boot + ":" + fields[19]
+            return _digest_identity(boot + ":" + fields[19])
         if sys.platform == "darwin":
             # Darwin sys/proc_info.h: PROC_PIDTBSDINFO (3), struct proc_bsdinfo.
             class ProcBSDInfo(ctypes.Structure):
@@ -368,7 +380,7 @@ def _process_start(pid: int) -> str | None:
             proc_pidinfo.restype = ctypes.c_int
             size = ctypes.sizeof(info)
             if proc_pidinfo(pid, 3, 0, ctypes.byref(info), size) == size:
-                return f"{info.start_sec}:{info.start_usec}"
+                return _digest_identity(f"{info.start_sec}:{info.start_usec}")
     except (OSError, ValueError, IndexError, AttributeError):
         pass
     return None

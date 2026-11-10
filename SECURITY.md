@@ -138,8 +138,14 @@ was truncated, the outcome code, HTTP status, number of flags and elapsed
 milliseconds (`elapsedMs`). It never contains the text or the key. New logs are
 created with mode 0600 on macOS and Linux; an existing log keeps its mode.
 Nisi runs have no per-call log; ticket admission state is
-stored separately. Admission and scope lock records include machine identity, PID, optional process
-start identity and creation time. Recovery requires matching local machine/PID-namespace identity,
+stored separately. Admission and scope lock records include a SHA-256 of the machine identity,
+PID, an optional SHA-256 of the process start identity, and creation time. The machine identity is
+Linux `/etc/machine-id` plus the PID namespace, or the macOS host UUID from `gethostuuid`. The start
+identity is the Linux boot id plus the process start time from `/proc/<pid>/stat`, or the macOS
+process start time. Neither raw value is written. Both hashes use the fixed prefix
+`agiw-mcp.lock-identity.v1`, so the same machine and the same process start still compare equal.
+A lock written by an older version, which stored those values in the clear, does not match and is
+not reclaimed. Recovery requires matching the local machine/PID-namespace hash,
 a minimum age of 60 seconds in both metadata and filesystem mtime, and a PID probe confirming
 that the process does not exist. A recorded start identity is checked; a live or unverifiable PID
 is never reclaimed, even after PID reuse. Foreign, legacy, partial or malformed records remain

@@ -257,14 +257,20 @@ class ProcessIdentityTests(IsolatedTestCase):
         with mock.patch.object(tickets.sys, 'platform', 'linux'), \
                 mock.patch.object(tickets.Path, 'read_text', return_value='a' * 32 + '\n'), \
                 mock.patch.object(tickets.os, 'readlink', return_value='pid:[123]'):
-            self.assertEqual(tickets._host_identity(), 'linux:' + 'a' * 32 + ':pid:[123]')
+            raw = 'linux:' + 'a' * 32 + ':pid:[123]'
+            digest = tickets._host_identity()
+            self.assertEqual(digest, tickets._digest_identity(raw))
+            self.assertNotIn('a' * 32, digest)
+            self.assertNotIn('pid:[123]', digest)
 
     def test_linux_start_identity_includes_boot_and_handles_complex_comm(self):
         # stat fields 3..21 precede starttime; comm may itself contain spaces and parentheses.
         data = '123 (a tricky ) name) ' + ' '.join(['0'] * 19 + ['456', '0'])
         with mock.patch.object(tickets.sys, 'platform', 'linux'), \
                 mock.patch.object(tickets.Path, 'read_text', side_effect=[data, 'boot-id\n']):
-            self.assertEqual(tickets._process_start(123), 'boot-id:456')
+            digest = tickets._process_start(123)
+            self.assertEqual(digest, tickets._digest_identity('boot-id:456'))
+            self.assertNotIn('boot-id', digest)
 
     def test_linux_identity_probe_failures_are_unknown(self):
         with mock.patch.object(tickets.sys, 'platform', 'linux'), \
