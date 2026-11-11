@@ -26,6 +26,21 @@ the caller's deadline; at most two HTTP workers may remain outstanding per proce
 and further calls fail rather than accumulating workers. A failed or timed-out Jev
 exchange may already have sent its request. There is no automatic retry.
 
+## MCP security practices
+
+This table maps selected [MCP security best practices](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices)
+to this local stdio server. OAuth and remote-session features named below are not
+implemented here. The table does not cover every practice in that guide.
+
+| Practice | Applicability here | Implementation and limits |
+|---|---|---|
+| Confused deputy through an OAuth proxy | OAuth proxy absent | There is no delegated OAuth flow or remote MCP HTTP endpoint. The process speaks JSON-RPC on stdio ([rpc.py](src/agiw_mcp/rpc.py)). |
+| Token passthrough | MCP bearer tokens absent | The server does not accept an MCP access token and forward it. The separate TypeSafe key is read after recorded consent and sent to the fixed Jev endpoint ([keys.py](src/agiw_mcp/keys.py), [jev.py](src/agiw_mcp/jev.py)); [Jev tests](tests/test_jev.py) check key redaction and refused redirects. |
+| Server-side request forgery | Configured model requests | Author and reviewer base URLs must use HTTP and a loopback literal, with optional port and base path ([config.py](src/agiw_mcp/config.py)); other model URLs are refused. Jev uses the fixed URL in [consent.py](src/agiw_mcp/consent.py). Python HTTP requests bypass proxies and refuse redirects ([net.py](src/agiw_mcp/net.py)). Loopback does not authenticate the service. [Configuration tests](tests/test_keys_consent_config.py) cover both model URL settings. |
+| Session or state-handle hijacking | Remote MCP session mechanism absent | The stdio transport has no `Mcp-Session-Id` ([rpc.py](src/agiw_mcp/rpc.py)). A claim ticket is caller-supplied cooperative exclusion, not authentication ([tickets.py](src/agiw_mcp/tickets.py)). |
+| Local MCP server compromise | Applies | The server runs as its invoking user. Nisi returns proposed contents without writing the project ([nisi.py](src/agiw_mcp/nisi.py)). Same-user config write access can forge consent; the stored record is not OS user presence. The MCP tool refuses grants ([tools.py](src/agiw_mcp/tools.py), [consent tests](tests/test_keys_consent_config.py)). |
+| Scope minimization | OAuth scopes absent | There is no OAuth scope list. Six fixed tools are exposed ([tools.py](src/agiw_mcp/tools.py)). When a claim ticket is supplied, proposed paths must fit its `writeScope`; a ticket is required only when configured ([ticket tests](tests/test_tickets.py)). Jev still requires recorded consent. |
+
 ## Consent
 
 - Enforced by the server. `agiw_jev_pre` and `agiw_jev_post` refuse with

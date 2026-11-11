@@ -8,6 +8,7 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ### Documentation
 
+- SECURITY.md maps selected MCP security practices to this stdio server and preserves the same-user consent limit.
 - `docs/release-notes/next.md` lists each merged pull request after `v0.1.0` in one sentence, plus what was not verified. The version stays `0.1.0`.
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
 - Use US spellings in the README, contributing notes, and provenance (`license`, `behavior`). The Claude Desktop section says the local-server guide lists macOS and Windows paths and does not list a Linux path.
