@@ -14,11 +14,10 @@ concurrency:
 jobs:
   test:
     name: Python ${{ matrix.python }} / Node ${{ matrix.node }} / ${{ matrix.os }}
-    # Linux uses the box. macOS stays on GitHub-hosted runners; the Mac runner stays off.
+    # Linux uses GitHub-hosted Ubuntu; same-repo macOS uses mac-m5. Fork PRs stay hosted.
     runs-on: >-
       ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
-          (matrix.os == 'ubuntu-latest' && fromJSON('["self-hosted", "Linux", "box-linux"]') ||
-           matrix.os) || matrix.os }}
+          matrix.os == 'macos-latest' && fromJSON('["self-hosted", "mac-m5"]') || matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -54,9 +53,7 @@ jobs:
 
   python-only:
     name: Python side without Node
-    runs-on: >-
-      ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
-          fromJSON('["self-hosted", "Linux", "box-linux"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -79,9 +76,7 @@ jobs:
 
   distribution:
     name: Installed wheel and sdist
-    runs-on: >-
-      ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
-          fromJSON('["self-hosted", "Linux", "box-linux"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -143,9 +138,7 @@ jobs:
 
   uv-git-install:
     name: uv tool install from git
-    runs-on: >-
-      ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
-          fromJSON('["self-hosted", "Linux", "box-linux"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -203,9 +196,7 @@ jobs:
 
   suite-compat:
     name: AGIW Suite main
-    runs-on: >-
-      ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
-          fromJSON('["self-hosted", "Linux", "box-linux"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
