@@ -190,7 +190,7 @@ function loopbackFetch(url, init = {}) {
     return Promise.reject(Object.assign(new Error('LOCAL_CHAT_DESTINATION_REFUSED'), { code: 'LOCAL_CHAT_DESTINATION_REFUSED' }));
   }
   const body = init.body == null ? Buffer.alloc(0) : Buffer.from(init.body);
-  const headers = { ...(init.headers ?? {}), 'content-length': String(body.length) };
+  const headers = { ...(init.headers ?? {}), 'content-length': String(body.length), connection: 'close' };
   return new Promise((resolve, reject) => {
     let req;
     try {
@@ -206,6 +206,7 @@ function loopbackFetch(url, init = {}) {
             if (Array.isArray(value)) value.forEach(item => headers.append(name, item));
             else if (value != null) headers.append(name, value);
           }
+          res.destroy();
           resolve(new Response(Buffer.concat(chunks), {
             status: res.statusCode ?? 0, statusText: res.statusMessage ?? '', headers,
           }));
