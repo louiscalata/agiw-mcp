@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Guidance for coding agents. Codex, Cursor, Copilot, and OpenCode read this
-file. Start with [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
-and [SECURITY.md](SECURITY.md). History and attribution:
+Guidance for coding agents using this repository. Start with
+[README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
+[SECURITY.md](SECURITY.md). History and attribution:
 [CHANGELOG.md](CHANGELOG.md), [PROVENANCE.md](PROVENANCE.md),
 [docs/release-notes/next.md](docs/release-notes/next.md).
 
@@ -45,8 +45,9 @@ Fail closed on vendor hashes, tickets, keys, and model URLs.
 
 ## Commands
 
-From a checkout, Python 3.10 or newer. Install the linter and the builder
-first with `python3 -m pip install ruff build`. Scrub prints
+From a checkout with Python 3.10 or newer and an activated virtual
+environment, install the linter and builder with
+`python3 -m pip install ruff build`. Scrub prints
 `scrub check passed`. `compileall -q` is silent on success. Tests end with
 `OK`. `python3 -m build` writes `dist/`.
 
@@ -61,9 +62,9 @@ python3 -m build
 ## CI
 
 `.github/workflows/ci.yml` runs on push and on pull request. Permissions are
-`contents: read`. Same-repo Linux jobs use the box (`box-linux`). macOS jobs
-use GitHub-hosted `macos-latest`. The Mac runner stays off. Same-repo Windows
-jobs use the PC (`pc-win`). Fork pull requests use GitHub-hosted runners.
+`contents: read`. Linux jobs use GitHub-hosted Ubuntu. Same-repo macOS jobs
+use the existing Mac runner (`mac-m5`); same-repo Windows jobs use the PC
+(`pc-win`). Fork pull requests use GitHub-hosted runners.
 
 - `test`: Python 3.10, 3.12, and 3.13 with Node 22, plus Python 3.13 with
   Node 24, on Linux and macOS. Scrub, `compileall -q src`, and unit tests.
