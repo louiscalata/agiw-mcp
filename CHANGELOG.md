@@ -8,15 +8,20 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ### Documentation
 
+- SECURITY.md maps selected MCP security practices to this stdio server and preserves the same-user consent limit.
 - `docs/release-notes/next.md` lists each merged pull request after `v0.1.0` in one sentence, plus what was not verified. The version stays `0.1.0`.
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
 - Use US spellings in the README, contributing notes, and provenance (`license`, `behavior`). The Claude Desktop section says the local-server guide lists macOS and Windows paths and does not list a Linux path.
 - Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
-- SECURITY.md maps each MCP security best practice to whether it applies here, and keeps the same-user consent limit.
+- The README lists the legacy `initialize` versions the server accepts: `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
 
 ### Tests
 
 - The git-install CI job lists tools with MCP Inspector 2.14.0. It does not call Jev or a model.
+
+### Tests
+
+- Windows CI runs the scrub check, compile, and unit tests on Python 3.12 and Node 22. Ticket-admission tests are skipped there because admission is refused before the ticket directory is touched.
 
 ### Packaging
 

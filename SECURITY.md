@@ -28,16 +28,18 @@ exchange may already have sent its request. There is no automatic retry.
 
 ## MCP security practices
 
-These rows follow the [MCP security best practices](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices). "Does not apply" means this server does not implement the feature that practice is about.
+This table maps selected [MCP security best practices](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices)
+to this local stdio server. OAuth and remote-session features named below are not
+implemented here. The table does not cover every practice in that guide.
 
-| Practice | Applies | What this server does |
+| Practice | Applicability here | Implementation and limits |
 |---|---|---|
-| Confused deputy | Does not apply | There is no OAuth proxy, no third-party authorization server, and no remote MCP HTTP endpoint. The process speaks JSON-RPC on stdio (`src/agiw_mcp/rpc.py`). |
-| Token passthrough | Does not apply | The server does not accept an MCP access token from the client or forward one. The TypeSafe key is the user's own key, read after consent (`src/agiw_mcp/keys.py`, `src/agiw_mcp/jev.py`). Tests check that the key is not echoed (`tests/test_jev.py`). |
-| Server-side request forgery | Applies | Model URLs must be `http://127.0.0.1` or `http://[::1]` (`src/agiw_mcp/config.py`, `validate_loopback_base_url`). Other URLs are refused (`src/agiw_mcp/net.py`). The Jev URL is the fixed constant in `src/agiw_mcp/consent.py`, not a client-supplied address. `tests/test_keys_consent_config.py` covers the network guard. |
-| Session hijacking | Does not apply | stdio has no `Mcp-Session-Id` and no protocol session (`src/agiw_mcp/rpc.py`). A claim ticket is cooperative exclusion chosen by the caller, not authentication (`src/agiw_mcp/tickets.py`). |
-| Local MCP server compromise | Applies | The server runs as the user who starts it. Nisi returns proposed file contents and does not write the project (`src/agiw_mcp/nisi.py`). Consent is not an operating-system user-presence check: any same-user process that can write the config directory can change `consent.json`. The MCP tool cannot grant consent (`tests/test_cli.py`). |
-| Scope minimization | Does not apply | There is no OAuth scope list. The server exposes six fixed tools (`src/agiw_mcp/tools.py`). Jev runs only after recorded consent (`src/agiw_mcp/consent.py`). |
+| Confused deputy through an OAuth proxy | OAuth proxy absent | There is no delegated OAuth flow or remote MCP HTTP endpoint. The process speaks JSON-RPC on stdio ([rpc.py](src/agiw_mcp/rpc.py)). |
+| Token passthrough | MCP bearer tokens absent | The server does not accept an MCP access token and forward it. The separate TypeSafe key is read after recorded consent and sent to the fixed Jev endpoint ([keys.py](src/agiw_mcp/keys.py), [jev.py](src/agiw_mcp/jev.py)); [Jev tests](tests/test_jev.py) check key redaction and refused redirects. |
+| Server-side request forgery | Configured model requests | Author and reviewer base URLs must use HTTP and a loopback literal, with optional port and base path ([config.py](src/agiw_mcp/config.py)); other model URLs are refused. Jev uses the fixed URL in [consent.py](src/agiw_mcp/consent.py). Python HTTP requests bypass proxies and refuse redirects ([net.py](src/agiw_mcp/net.py)). Loopback does not authenticate the service. [Configuration tests](tests/test_keys_consent_config.py) cover both model URL settings. |
+| Session or state-handle hijacking | Remote MCP session mechanism absent | The stdio transport has no `Mcp-Session-Id` ([rpc.py](src/agiw_mcp/rpc.py)). A claim ticket is caller-supplied cooperative exclusion, not authentication ([tickets.py](src/agiw_mcp/tickets.py)). |
+| Local MCP server compromise | Applies | The server runs as its invoking user. Nisi returns proposed contents without writing the project ([nisi.py](src/agiw_mcp/nisi.py)). Same-user config write access can forge consent; the stored record is not OS user presence. The MCP tool refuses grants ([tools.py](src/agiw_mcp/tools.py), [consent tests](tests/test_keys_consent_config.py)). |
+| Scope minimization | OAuth scopes absent | There is no OAuth scope list. Six fixed tools are exposed ([tools.py](src/agiw_mcp/tools.py)). When a claim ticket is supplied, proposed paths must fit its `writeScope`; a ticket is required only when configured ([ticket tests](tests/test_tickets.py)). Jev still requires recorded consent. |
 
 ## Consent
 
@@ -151,18 +153,33 @@ was truncated, the outcome code, HTTP status, number of flags and elapsed
 milliseconds (`elapsedMs`). It never contains the text or the key. New logs are
 created with mode 0600 on macOS and Linux; an existing log keeps its mode.
 Nisi runs have no per-call log; ticket admission state is
-stored separately. Admission and scope lock records include machine identity, PID, optional process
-start identity and creation time. Recovery requires matching local machine/PID-namespace identity,
+stored separately. Admission and scope lock records include an HMAC-SHA256 of the machine identity,
+PID, an optional HMAC-SHA256 of the process start identity, and creation time. The machine identity is
+Linux `/etc/machine-id` plus the PID namespace, or the macOS host UUID from `gethostuuid`. The start
+identity is the Linux boot id plus the process start time from `/proc/<pid>/stat`, or the macOS
+process start time. Neither raw value is written. The HMAC key is 32 random bytes stored in the
+ticket state directory as `identity.key`, created on first use with mode 0600. It is never logged
+and must not be committed. The same install reuses that file, so the same machine and the same
+process start still compare equal. A different key produces a different digest, which stops a lock
+from being linked to another install or confirming a guessed machine id or boot id. The HMAC message
+is prefixed with `agiw-mcp.lock-identity.v1` only to keep a machine digest distinct from a boot
+digest; that prefix is not a secret. A key file that is missing, the wrong size, linked elsewhere,
+or not mode 0600 is ignored, and recovery stays fail-closed.
+A lock written by an older version, which stored those values in the clear, does not match and is
+not reclaimed. A lock written with the unkeyed SHA-256 of that public prefix also does not match
+and is not reclaimed. Remove either by hand only after the owning process is confirmed dead.
+Recovery requires matching the local machine/PID-namespace HMAC,
 a minimum age of 60 seconds in both metadata and filesystem mtime, and a PID probe confirming
 that the process does not exist. A recorded start identity is checked; a live or unverifiable PID
 is never reclaimed, even after PID reuse. Foreign, legacy, partial or malformed records remain
 fail-closed. Recovery serializes reclaimers with `flock` on the candidate inode and checks pathname
 identity before unlinking through the verified directory descriptor. Symlinks, hardlinked candidates
 and files owned by another user are not reclaimed. This relies on reliable POSIX advisory locking,
-unique machine identities and the existing private-directory trust boundary; same-user manual
-replacement of lock files during recovery is outside that boundary.
+unique machine identities, the identity key staying mode 0600, and the existing private-directory
+trust boundary; same-user manual replacement of lock files during recovery is outside that boundary.
 
 Successful recovery emits a `TICKET_LOCK_RECLAIMED` warning through Python logging (stderr by
-default), with lock kind, PID, reason and age. It omits owner text, host identifiers and scope paths.
+default), with lock kind, PID, reason and age. It omits owner text, host identifiers, the identity
+key and scope paths.
 Recovery is demand-driven by a later admission, not a background service; incomplete lock writes
 still require manual cleanup after all active runs have been ruled out.

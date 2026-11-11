@@ -17,6 +17,10 @@ from agiw_mcp.config import load_config
 from agiw_mcp.errors import ToolError
 
 ARGS = {"task": "Fix add", "files": [{"path": "src/calc.py", "content": "def add(a, b):\n    return a - b\n"}]}
+_SKIP_ADMISSION = unittest.skipIf(
+    sys.platform == "win32",
+    "ticket admission is refused on Windows before the ticket directory is touched",
+)
 WINDOWS_ALIASES = ("calc.py.", "calc.py ", "src./a.py", "src /a.py", "a/b.", "a/b..", "CON", "con.txt",
                    "src/NUL.tar.gz", "Com1", "lpt9.log", "aux ", "con .txt", "PRN", "COM¹", "conin$",
                    "a:b", "calc.py:stream", "c:", "src/a.py::$DATA", " src", "src ")
@@ -106,6 +110,32 @@ class TicketValidationTests(IsolatedTestCase):
         self.assertFalse(tickets.overlaps("docs", "src"))
 
 
+class WindowsRefusalTests(IsolatedTestCase):
+    """The refusal itself does not need a POSIX ticket directory."""
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.tmp / "tickets"
+        self.registry = tickets.Registry(self.root)
+
+    def test_windows_refused_before_touching_filesystem(self):
+        # Both platform signals refuse on their own; nothing below admit() may run.
+        boom = mock.Mock(side_effect=AssertionError("filesystem touched on Windows"))
+        for patch in (mock.patch.object(tickets.os, "name", "nt"), mock.patch.object(tickets.sys, "platform", "win32")):
+            for candidate in (ticket(), ticket(state="Requested"), None):
+                with patch, mock.patch.object(tickets, "_open_dir", boom), \
+                        mock.patch.object(tickets, "validate", boom), self.assertRaises(ToolError) as ctx:
+                    self.registry.admit(candidate)
+                self.assertEqual(ctx.exception.code, "TICKET_UNSUPPORTED_PLATFORM")
+                self.assertIn("Windows", ctx.exception.message)
+                self.assertIn("reparse-point", ctx.exception.message)
+                self.assertEqual(ctx.exception.details, {})
+        boom.assert_not_called()
+        self.assertFalse(self.root.exists())
+        self.assertEqual(self.registry.admitted(), [])
+
+
+@_SKIP_ADMISSION
 class RegistryTests(IsolatedTestCase):
     def setUp(self):
         super().setUp()
@@ -162,22 +192,6 @@ class RegistryTests(IsolatedTestCase):
         with self.assertRaises(ToolError):
             self.registry.admit(ticket("T-2", scope=("src",)))
         self.registry.admit(ticket("T-3", scope=("srcx", "src/a/c.py")))
-
-    def test_windows_refused_before_touching_filesystem(self):
-        # Both platform signals refuse on their own; nothing below admit() may run.
-        boom = mock.Mock(side_effect=AssertionError("filesystem touched on Windows"))
-        for patch in (mock.patch.object(tickets.os, "name", "nt"), mock.patch.object(tickets.sys, "platform", "win32")):
-            for candidate in (ticket(), ticket(state="Requested"), None):
-                with patch, mock.patch.object(tickets, "_open_dir", boom), \
-                        mock.patch.object(tickets, "validate", boom), self.assertRaises(ToolError) as ctx:
-                    self.registry.admit(candidate)
-                self.assertEqual(ctx.exception.code, "TICKET_UNSUPPORTED_PLATFORM")
-                self.assertIn("Windows", ctx.exception.message)
-                self.assertIn("reparse-point", ctx.exception.message)
-                self.assertEqual(ctx.exception.details, {})
-        boom.assert_not_called()
-        self.assertFalse(self.root.exists())
-        self.assertEqual(self.registry.admitted(), [])
 
     def test_windows_refusal_leaves_posix_admission_unchanged(self):
         with mock.patch.object(tickets.sys, "platform", "win32"), self.assertRaises(ToolError):
@@ -240,7 +254,9 @@ class RegistryTests(IsolatedTestCase):
                 self.registry.admit(ticket("T-1", scope=("a", "b", "c", "d")))
         self.assertEqual(ctx.exception.code, "TICKET_REGISTRY_UNAVAILABLE", faults)
         self.assertEqual(ctx.exception.details, {"ticketId": "T-1"})
-        self.assertEqual(sorted(p.name for p in self.root.iterdir()), [], faults)
+        # identity.key is the per-install HMAC key, not a lock this admission created.
+        names = [p.name for p in self.root.iterdir() if p.name != tickets._LOCK_IDENTITY_SECRET_NAME]
+        self.assertEqual(sorted(names), [], faults)
         self.assertEqual(self.registry.admitted(), [])
         self.registry.admit(ticket("T-1", scope=("a", "b", "c", "d")))
         self.assertTrue(self.registry.release("T-1"))
@@ -642,6 +658,7 @@ class NisiTicketTests(IsolatedTestCase):
         self.assertFalse(self.root.exists())
         self.assertEqual(tickets.registry().admitted(), [])
 
+    @_SKIP_ADMISSION
     def test_overlapping_ticket_refused_without_side_effects(self):
         held = tickets.registry()
         held.admit(ticket("HELD", scope=("src",)))
@@ -666,6 +683,7 @@ class NisiTicketTests(IsolatedTestCase):
             load_config()
         self.assertEqual(ctx.exception.code, "CONFIG_INVALID")
 
+    @_SKIP_ADMISSION
     def test_admitted_before_run_and_released_after(self):
         seen = []
 
@@ -681,6 +699,7 @@ class NisiTicketTests(IsolatedTestCase):
         self.assertEqual(tickets.registry().admitted(), [])
         self.assertEqual(list(self.root.glob("scope-*.lock")), [])
 
+    @_SKIP_ADMISSION
     def test_released_when_run_fails(self):
         with mock.patch.object(nisi, "find_node", return_value=(None, None)):
             with self.assertRaises(ToolError) as ctx:
@@ -690,6 +709,7 @@ class NisiTicketTests(IsolatedTestCase):
         tickets.registry().admit(ticket("T-2"))
         tickets.registry().release("T-2")
 
+    @_SKIP_ADMISSION
     def test_require_ticket_with_admissible_ticket_runs(self):
         self.write_config(author_model="author-model", reviewer_model="reviewer-model", require_ticket=True)
         with mock.patch.object(nisi, "_run_validated", return_value={"outcome": "COMPLETED"}) as inner:

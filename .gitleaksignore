@@ -1,3 +1,7 @@
-# SHA-256 of policy/file-access.mjs in the vendored Nisi manifest.
-# The same digest is published in PROVENANCE.md. It is not an API key.
+# The only gitleaks waiver in this repository. Fingerprint of the one
+# generic-api-key finding: commit 61298027 (tag v0.1.0, where it was
+# introduced), file, rule, and line. That line is the SHA-256 of
+# policy/file-access.mjs, 92f9f60220e1869ad0d6571ae2b5a8ddc9259b2463c4cf617d4cecee6eacc1d3,
+# which PROVENANCE.md also lists. It is not an API key. A scan of this
+# history with gitleaks 8.28.0 reports that finding and no others.
 61298027ad78807f59cf130c6f0fb9d6c584ccfc:src/agiw_mcp/vendor/nisi/manifest.json:generic-api-key:20

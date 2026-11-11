@@ -281,6 +281,7 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertEqual((env["HOME"], env["TMPDIR"], env["TMP"], env["TEMP"]), ("/tmp/work",) * 4)
         self.assertEqual((env["LANG"], env["NODE_NO_WARNINGS"]), ("C.UTF-8", "1"))
 
+    @unittest.skipIf(os.name == "nt", "the fake node is a POSIX shebang script")
     def test_probes_get_no_keys_or_proxies(self):
         seen = self.tmp / "probe-env.json"
         fake = write_fake_node(self.tmp / "envbin", "import json, os, pathlib, sys\n"

@@ -75,15 +75,39 @@ def config_dir() -> Path:
 
 
 def display_path(path) -> str:
-    """Show a path with the home directory replaced by ~."""
+    """Show a path with the home directory replaced by ~.
+
+    On Windows the home prefix matches either separator and ignores case, so
+    `C:\\Users\\Me` and `c:/users/me` are the same home.
+    """
     text = str(path)
     try:
         home = str(Path.home())
     except (RuntimeError, KeyError):
         return text
+    if os.name == "nt":
+        relative = _relative_to_home(text, home)
+        if relative is None:
+            return text
+        return "~" if relative == "" else "~/" + relative
     if home and home not in ("/", "\\") and (text == home or text.startswith(home + os.sep)):
         return "~" + text[len(home):]
     return text
+
+
+def _split_display_path(text: str) -> list[str]:
+    return [part for part in text.replace("\\", "/").split("/") if part]
+
+
+def _relative_to_home(text: str, home: str) -> str | None:
+    text_parts = _split_display_path(text)
+    home_parts = _split_display_path(home)
+    if not home_parts or len(text_parts) < len(home_parts):
+        return None
+    if not all(text_parts[index].casefold() == home_parts[index].casefold()
+               for index in range(len(home_parts))):
+        return None
+    return "/".join(text_parts[len(home_parts):])
 
 
 def validate_loopback_base_url(value, name: str = "model_base_url") -> str:

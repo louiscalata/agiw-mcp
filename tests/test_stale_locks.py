@@ -3,10 +3,12 @@
 import errno
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
 import time
+import unittest
 from unittest import mock
 
 from support import SRC, IsolatedTestCase, subprocess_env
@@ -15,6 +17,10 @@ from agiw_mcp import tickets
 from agiw_mcp.errors import ToolError
 
 
+@unittest.skipIf(
+    sys.platform == "win32",
+    "ticket admission is refused on Windows before the ticket directory is touched",
+)
 class StaleLockTests(IsolatedTestCase):
     def setUp(self):
         super().setUp()
@@ -50,6 +56,8 @@ class StaleLockTests(IsolatedTestCase):
         self.assertIn('TICKET_LOCK_RECLAIMED kind=admission', logs.output[0])
         self.assertIn('TICKET_LOCK_RECLAIMED kind=scope', logs.output[1])
         self.assertNotIn('private-owner', repr(logs.output))
+        secret = (self.root / tickets._LOCK_IDENTITY_SECRET_NAME).read_bytes()
+        self.assertNotIn(secret.hex(), '\n'.join(logs.output))
         self.assertEqual(registry.admitted(), ['T-1'])
         record = json.loads(next(self.root.glob('scope-*.lock')).read_text())
         self.assertEqual(record['processOwner']['pid'], os.getpid())
@@ -60,7 +68,7 @@ class StaleLockTests(IsolatedTestCase):
         path = self.write_lock()
         with mock.patch.object(tickets, '_process_start', return_value='new-start') as start:
             self.assertFalse(self.reclaim())
-        start.assert_called_once_with(os.getpid())
+        start.assert_called_once_with(os.getpid(), mock.ANY)
         self.assertTrue(path.exists())
 
     def test_matching_start_time_kept(self):
@@ -76,7 +84,7 @@ class StaleLockTests(IsolatedTestCase):
         self.write_lock()
         with mock.patch.object(tickets, '_process_start', return_value=None) as start:
             self.assertTrue(self.reclaim())
-        start.assert_called_once_with(self.owner['pid'])
+        start.assert_called_once_with(self.owner['pid'], mock.ANY)
 
     def test_recent_or_future_lock_kept(self):
         for created_age, file_age in ((0, 120), (120, 0), (-120, 120), (120, -120)):
@@ -180,7 +188,7 @@ class StaleLockTests(IsolatedTestCase):
 
     def test_sigkill_owner_and_competing_process_admissions(self):
         self.host.stop()  # real machine identity, real PIDs and actual process death
-        self.assertIsNotNone(tickets._host_identity())
+        self.assertIsNotNone(tickets._host_identity(tickets._identity_secret(self.root, self.fd)))
         code = """
 import sys
 from pathlib import Path
@@ -246,23 +254,103 @@ except ToolError as e:
                     proc.kill()
                 proc.communicate(timeout=10)
 
+    def test_raw_identity_is_never_written(self):
+        self.host.stop()
+        machine = 'd' * 32
+        boot = 'raw-boot-id-value'
+        namespace = 'pid:[4242]'
+        stat_line = '1 (python) ' + ' '.join(['0'] * 19 + ['456', '0'])
+
+        def read_text(path, *args, **kwargs):
+            text = str(path)
+            if text == '/etc/machine-id':
+                return machine + '\n'
+            if text == '/proc/sys/kernel/random/boot_id':
+                return boot + '\n'
+            if text.endswith('/stat'):
+                return stat_line
+            raise OSError(text)
+
+        with mock.patch.object(tickets.sys, 'platform', 'linux'), \
+                mock.patch.object(tickets.Path, 'read_text', read_text), \
+                mock.patch.object(tickets.os, 'readlink', return_value=namespace):
+            registry = tickets.Registry(self.root)
+            registry.admit(ticket())
+        self.addCleanup(registry.release, 'T-1')
+        secret_path = self.root / tickets._LOCK_IDENTITY_SECRET_NAME
+        secret = secret_path.read_bytes()
+        raw = 'linux:' + machine + ':' + namespace
+        record = json.loads(next(self.root.glob('scope-*.lock')).read_text())
+        self.assertEqual(record['processOwner']['host'], tickets._digest_identity(raw, secret))
+        self.assertEqual(record['processOwner']['startTime'], tickets._digest_identity(boot + ':456', secret))
+        for path in self.root.iterdir():
+            if not path.is_file():
+                continue
+            blob = path.read_bytes()
+            for piece in (machine, boot, namespace, raw):
+                self.assertNotIn(piece.encode('ascii'), blob)
+            if path.name != tickets._LOCK_IDENTITY_SECRET_NAME:
+                self.assertNotIn(secret, blob)
+                self.assertNotIn(secret.hex().encode('ascii'), blob)
+
+    def test_identity_secret_file_is_mode_0600(self):
+        previous = os.umask(0o177)
+        try:
+            first = tickets._identity_secret(self.root, self.fd)
+        finally:
+            os.umask(previous)
+        self.assertEqual(len(first), 32)
+        path = self.root / tickets._LOCK_IDENTITY_SECRET_NAME
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(path.stat().st_uid, os.geteuid())
+        self.assertEqual(tickets._identity_secret(self.root, self.fd), first)
+        self.assertFalse(any(name.startswith('.identity.key.') for name in os.listdir(self.root)))
+        os.chmod(path, 0o644)
+        self.assertIsNone(tickets._identity_secret(self.root, self.fd))
+
 
 class ProcessIdentityTests(IsolatedTestCase):
     def test_linux_machine_identity_includes_pid_namespace(self):
+        secret = b'k' * 32
         with mock.patch.object(tickets.sys, 'platform', 'linux'), \
                 mock.patch.object(tickets.Path, 'read_text', return_value='a' * 32 + '\n'), \
                 mock.patch.object(tickets.os, 'readlink', return_value='pid:[123]'):
-            self.assertEqual(tickets._host_identity(), 'linux:' + 'a' * 32 + ':pid:[123]')
+            raw = 'linux:' + 'a' * 32 + ':pid:[123]'
+            digest = tickets._host_identity(secret)
+            self.assertEqual(digest, tickets._digest_identity(raw, secret))
+            self.assertNotIn('a' * 32, digest)
+            self.assertNotIn('pid:[123]', digest)
 
     def test_linux_start_identity_includes_boot_and_handles_complex_comm(self):
         # stat fields 3..21 precede starttime; comm may itself contain spaces and parentheses.
+        secret = b'k' * 32
         data = '123 (a tricky ) name) ' + ' '.join(['0'] * 19 + ['456', '0'])
         with mock.patch.object(tickets.sys, 'platform', 'linux'), \
                 mock.patch.object(tickets.Path, 'read_text', side_effect=[data, 'boot-id\n']):
-            self.assertEqual(tickets._process_start(123), 'boot-id:456')
+            digest = tickets._process_start(123, secret)
+            self.assertEqual(digest, tickets._digest_identity('boot-id:456', secret))
+            self.assertNotIn('boot-id', digest)
 
     def test_linux_identity_probe_failures_are_unknown(self):
+        secret = b'k' * 32
         with mock.patch.object(tickets.sys, 'platform', 'linux'), \
                 mock.patch.object(tickets.Path, 'read_text', side_effect=PermissionError):
-            self.assertIsNone(tickets._host_identity())
-            self.assertIsNone(tickets._process_start(123))
+            self.assertIsNone(tickets._host_identity(secret))
+            self.assertIsNone(tickets._process_start(123, secret))
+        self.assertIsNone(tickets._host_identity(None))
+        self.assertIsNone(tickets._process_start(123, b''))
+
+    def test_same_id_under_different_secrets_differs(self):
+        raw_machine = 'a' * 32
+        raw = 'linux:' + raw_machine + ':pid:[123]'
+        one, two = b'1' * 32, b'2' * 32
+        with mock.patch.object(tickets.sys, 'platform', 'linux'), \
+                mock.patch.object(tickets.Path, 'read_text', return_value=raw_machine + '\n'), \
+                mock.patch.object(tickets.os, 'readlink', return_value='pid:[123]'):
+            first = tickets._host_identity(one)
+            second = tickets._host_identity(two)
+        self.assertEqual(first, tickets._digest_identity(raw, one))
+        self.assertEqual(second, tickets._digest_identity(raw, two))
+        self.assertNotEqual(first, second)
+        self.assertNotIn(raw_machine, first)
+        self.assertNotIn('pid:[123]', first)

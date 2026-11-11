@@ -6,7 +6,7 @@
 
 AGIW MCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server: a readiness check for this machine, optional consent-gated questions to TypeSafe's Jev model, and one Nisi run on file contents you supply.
 
-**Status:** the `v0.1.0` tag and current main both report version `0.1.0`. Python 3.10 or newer. Node.js 22 or newer when a Nisi run needs it. macOS and Linux are in CI. Apache-2.0. Not published to PyPI.
+**Status:** the `v0.1.0` tag and current main both report version `0.1.0`. Python 3.10 or newer. Node.js 22 or newer when a Nisi run needs it. CI runs on macOS, Linux, and Windows. Apache-2.0. Not published to PyPI.
 
 ## Quick start
 
@@ -41,6 +41,8 @@ The JSON has `"status": "NOT_READY"` and `"missing": {"id": "models", ...}`. Wit
 
 With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize request for protocol `2025-03-26`, then `tools/list`, returned server `agiw-mcp` `0.1.0` and these tools: `agiw_readiness`, `agiw_status`, `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, `agiw_nisi_run`.
 
+The legacy `initialize` handshake accepts `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
+
 Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are in [Client setup](#client-setup).
 
 ## How it works
@@ -61,7 +63,7 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 
 - Install from a checkout with `pipx install .` or `uv tool install .`, and from git with `main` or `v0.1.0`.
 - `agiw-mcp --version`, `agiw-mcp readiness`, and the stdio initialize / `tools/list` handshake.
-- The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24.
+- The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
 - Vendored Nisi v0.2.0, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text.
 
@@ -69,7 +71,7 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 
 - A release newer than `v0.1.0`. Main has later fixes and still reports `0.1.0`.
 - PyPI. Install from git or from a checkout.
-- Windows in CI. Ticket admission is refused on Windows (`TICKET_UNSUPPORTED_PLATFORM`) before it touches the ticket directory. Runs without a ticket still work there unless `require_ticket` is true.
+- Ticket admission on Windows. CI runs the other unit tests there. Admission is still refused (`TICKET_UNSUPPORTED_PLATFORM`) before the ticket directory is touched. Runs without a ticket still work there unless `require_ticket` is true.
 - Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
 - OpenCode protocol `2026-07-28` is not implemented. OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is the one this server answers.
 - A live request to TypeSafe is not part of the tests. `agiw_jev_pre` and `agiw_jev_post` refuse until consent is recorded and a key is available. CI uses a local fake for the success path.
@@ -174,12 +176,13 @@ Remove it with `claude mcp remove agiw`.
 
 **Claude Desktop**
 
-Settings, Developer, Edit Config opens `claude_desktop_config.json`. The [MCP local-server guide](https://modelcontextprotocol.io/docs/2025-11-25/develop/connect-local-servers) gives these paths:
+Settings, Developer, Edit Config opens `claude_desktop_config.json`. The current [MCP local-server guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers) lists these paths:
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
 
-That guide says Claude Desktop is also available for Linux. It does not list a Linux path. Edit Config still opens the file.
+The 2025-11-25 snapshot of that guide lists macOS and Windows only. Edit Config still opens the file.
 
 Quit Claude Desktop completely and start it again after saving. Closing the window leaves the process running.
 
@@ -200,7 +203,7 @@ Quit Claude Desktop completely and start it again after saving. Closing the wind
 
 **Cursor**
 
-Project config is `.cursor/mcp.json`. Config for every project on the machine is `~/.cursor/mcp.json`. When both name `agiw`, Cursor uses the project entry. The stdio fields in Cursor's MCP docs include `type`; this snippet sets it to `stdio`. Save the file and reload MCP.
+Project config is `.cursor/mcp.json`. Config for every project on the machine is `~/.cursor/mcp.json`. When both name `agiw`, Cursor uses the project entry. The stdio fields in Cursor's MCP docs include `type`; this snippet sets it to `stdio`. Save the file and restart Cursor.
 
 ```json
 {
