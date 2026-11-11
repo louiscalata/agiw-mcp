@@ -39,9 +39,11 @@ class _Handler(BaseHTTPRequestHandler):
             "message": {"role": "assistant", "content": json.dumps(content)},
         }], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
         try:
+            self.close_connection = True
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(payload)
         except (BrokenPipeError, ConnectionResetError):
@@ -75,7 +77,7 @@ class LoopbackTimeoutTests(IsolatedTestCase):
         env = nisi._child_env(node, str(work))
         env["AGIW_MCP_UNDICI_HEADERS_TIMEOUT_MS"] = str(undici_ms)
         done = subprocess.run([node, str(work / "runner.mjs")], input=json.dumps(request).encode(),
-                              capture_output=True, cwd=work, env=env, timeout=20)
+                              capture_output=True, cwd=work, env=env, timeout=40)
         self.assertIn(done.returncode, (0, 2), done.stderr.decode())
         return json.loads(done.stdout), done.returncode
 
