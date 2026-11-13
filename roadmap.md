@@ -5,6 +5,7 @@ The latest release is `v0.1.0`. Main contains later fixes and still reports vers
 ## Next release
 
 - [ ] Resolve the outstanding public-review findings.
+- [x] Fix Nisi transport IPv6 loopback handling, enforce the 8 MiB response limit during receipt, and reject empty query and fragment delimiters in base URLs.
 - [ ] Assign a version and publish a reviewed release containing the changes on main.
 
 ## Validation

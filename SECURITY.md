@@ -116,12 +116,16 @@ implemented here. The table does not cover every practice in that guide.
   candidate as data. When Node advertises `--allow-net`, that flag is also set;
   it permits network access generally. Loopback restrictions are enforced by
   application URL validation, not by Node's network permission flag.
-- Configuration accepts IPv4 and IPv6 loopback literals over HTTP. The current
-  Nisi HTTP transport supports only `127.0.0.1`; it rejects `[::1]`. agiw-mcp
-  cannot verify what the server behind that port does with the data.
-- The Nisi adapter rejects model response bodies above 8 MiB after receipt.
-  The current host HTTP transport buffers the entire body before that check,
-  so it does not enforce an 8 MiB memory bound while receiving a response.
+- Configuration and the Nisi HTTP transport accept only `127.0.0.1` and `[::1]`
+  loopback literals over HTTP. Credentials, queries and fragments are refused,
+  including an empty trailing `?` or `#`. The Nisi runner checks the endpoint
+  text before URL parsing, so other spellings that a URL parser would turn into
+  a loopback address (decimal, hexadecimal, octal or shortened IPv4, a trailing
+  dot, longer IPv6 forms, `localhost`) are refused. Redirects are not followed.
+  agiw-mcp cannot verify what the server behind that port does with the data.
+- The host HTTP transport counts model response bytes before retaining each chunk.
+  It aborts the request when a chunk would take the body above 8 MiB and refuses
+  the response with `LOCAL_CHAT_RESPONSE_TOO_LARGE`.
 
 ## Threat model
 
