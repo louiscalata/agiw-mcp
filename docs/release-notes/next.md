@@ -1,7 +1,6 @@
 # Next release notes
 
-These are the merged pull requests on main after tag `v0.1.0` (`f69630a`).
-The package version is still `0.1.0`. That number is not assigned here.
+These historical notes cover selected pull requests through #21 after tag `v0.1.0` (`f69630a`). They are not a complete list of changes on current main. See [CHANGELOG.md](../../CHANGELOG.md) for the current unreleased summary. The package version remains `0.1.0`.
 
 - #1 keeps `SystemRoot`, `SYSTEMDRIVE`, and `WINDIR` in the Windows environment used to probe Node.
 - #2 brings the Mac working copy of config, keys, readiness, and Nisi response handling into this repo, with more tests.
@@ -21,12 +20,11 @@ The package version is still `0.1.0`. That number is not assigned here.
 - #20 uses US spellings and says the Claude Desktop guide does not list a Linux config path.
 - #21 renames the unreleased changelog sections so they match what the notes describe.
 
-## Not verified
+## Verification in this historical review
 
 - Claude Desktop, Claude Code, Factory, OpenCode, and Cursor were not launched.
 - macOS Keychain was not used.
-- Windows is not in CI.
+- Windows and MCP Inspector were not covered by this historical review. Current CI includes a Windows unit-test job and MCP Inspector `tools/list`.
 - `pipx install` was not run in these notes.
 - A live request to TypeSafe was not sent.
 - OpenCode protocol `2026-07-28` is not implemented, and that client was not started.
-- The MCP Inspector was not run.

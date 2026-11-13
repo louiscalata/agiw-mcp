@@ -37,7 +37,7 @@ With no model ids configured, readiness exits 1 and does not start a server:
 agiw-mcp readiness
 ```
 
-The JSON has `"status": "NOT_READY"` and `"missing": {"id": "models", ...}`. With Node 22 on `PATH` and no model ids, that is the first failed check. `READY` also needs two different model ids and a loopback model server that lists both. See [Configuration file and environment variables](#configuration-file-and-environment-variables).
+The JSON has `"status": "NOT_READY"` and `"missing": {"id": "models", ...}`. With Node 22 on `PATH` and no model ids, that is the first failed check. `READY` also needs two different model IDs. By default, both must appear in `GET <model_base_url>/models`. If `reviewer_base_url` is set, the author must appear in the author server's list and the reviewer in the reviewer server's list. See [Configuration file and environment variables](#configuration-file-and-environment-variables).
 
 With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize request for protocol `2025-03-26`, then `tools/list`, returned server `agiw-mcp` `0.1.0` and these tools: `agiw_readiness`, `agiw_status`, `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, `agiw_nisi_run`.
 
@@ -49,7 +49,7 @@ Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are i
 
 Say "initiate online code mode" with no task. The assistant should call `agiw_readiness` and report `READY`, or the first missing local prerequisite and its fix. That call starts nothing.
 
-1. **Readiness** checks, in order: Python 3.10 or newer, configuration, Node.js 22 or newer on `PATH`, the vendored Nisi v0.2.0 hashes, then a local OpenAI-compatible model server. The model server must be `http://127.0.0.1:<port>/...` or `http://[::1]:<port>/...`, and it must list two **different** configured model ids. The check stops at the first failure. Hostnames, HTTPS and other addresses are refused.
+1. **Readiness** checks, in order: Python 3.10 or newer, configuration, Node.js 22 or newer on `PATH`, the vendored Nisi v0.2.0 hashes, then the configured local OpenAI-compatible model servers. Configure two different model IDs. By default, both must appear in `GET <model_base_url>/models`. If `reviewer_base_url` is set, the author must appear in the author server's list and the reviewer in the reviewer server's list. Nisi runs currently require an IPv4 loopback URL (`http://127.0.0.1:<port>/...`). Configuration and readiness accept `http://[::1]:<port>/...`, but the current Nisi HTTP transport rejects it. The check stops at the first failure. Hostnames, HTTPS and other addresses are refused.
 2. **Nisi** (`agiw_nisi_run`) runs one Nisi v0.2.0 workflow on the file contents in the request. A local author model drafts, static checks and your assertions run, a different local reviewer model reviews, and a short repair loop follows (`repair_budget` 0 to 3, default 1). You get proposed file contents and a report. The server never reads or writes your project and never runs the generated code. `COMPLETED` means those checks passed. It is not a verdict that the proposal is right.
 3. **Jev** is optional and is not required for a Nisi run. `agiw_jev_pre` sends a task (at most 12 KiB) and `agiw_jev_post` sends a report (truncated to 12 KiB) to `https://api.typesafe.ai/v1/systemone`. The default model is `jev-1.14.0`. Both refuse until consent is recorded and a TypeSafe API key is available. The MCP tool can show or revoke consent. It cannot grant it. `agiw-mcp consent grant` asks in an interactive terminal. The answers are advisory.
 
@@ -61,8 +61,6 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 
 **Works**
 
-- Install from a checkout with `pipx install .` or `uv tool install .`, and from git with `main` or `v0.1.0`.
-- `agiw-mcp --version`, `agiw-mcp readiness`, and the stdio initialize / `tools/list` handshake.
 - The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
 - Vendored Nisi v0.2.0, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text.
@@ -75,7 +73,7 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 - Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
 - OpenCode protocol `2026-07-28` is not implemented. OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is the one this server answers.
 - A live request to TypeSafe is not part of the tests. `agiw_jev_pre` and `agiw_jev_post` refuse until consent is recorded and a key is available. CI uses a local fake for the success path.
-- Granting consent is not an OS user-presence check. Any same-user process that can write the config directory can change `consent.json`.
+- Granting consent is not an OS user-presence check. Any same-user process that can write the config directory can change `consent.json`. This limit also applies to `v0.1.0`, whose README overstates the consent guarantee.
 - `COMPLETED` does not apply files. You do that yourself, after reading the proposal.
 
 ## Tools
@@ -91,16 +89,16 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 
 ## Setup details
 
-The readiness and key errors name these headings. The commands in [Quick start](#quick-start) are the ones run for this page. The blocks below are the file formats and the program's own commands.
+Readiness and key errors refer to the headings in this section. The blocks below are the file formats and the program's own commands.
 
 ### Requirements and the local model server
 
 - Python 3.10 or newer.
 - Node.js 22 or newer on the `PATH` of whatever starts `agiw-mcp`, when you use Nisi.
 - A local chat server that supports `response_format: {"type": "json_schema"}`, listening on loopback HTTP only.
-- Two different model ids, exactly as `GET <model_base_url>/models` lists them. Nisi refuses a response whose `model` field differs.
+- Two different model IDs. By default, both must appear in `GET <model_base_url>/models`. If `reviewer_base_url` is set, the author must appear in the author server's list and the reviewer in the reviewer server's list. Nisi refuses a response whose `model` field differs.
 
-`reasoning_effort` (`none`, `low`, `medium` or `high`) is sent on each Nisi chat request. For reasoning models such as Qwen 3 or Granite 4 on LM Studio, set `none`. Under JSON-schema output they otherwise spend the token budget on hidden reasoning and return an empty answer.
+When configured, `reasoning_effort` (`none`, `low`, `medium` or `high`) is sent on Nisi chat requests. It is omitted by default. If a model returns an answer only in `reasoning_content` with empty or missing `content`, agiw-mcp refuses it with `MODEL_ANSWER_IN_REASONING`; try setting `reasoning_effort` to `"none"` or `AGIW_MCP_REASONING_EFFORT=none`, then retry.
 
 ### Configuration file and environment variables
 
@@ -112,7 +110,7 @@ The readiness and key errors name these headings. The commands in [Quick start](
 
 `AGIW_MCP_CONFIG_DIR` overrides that directory and must be an absolute path.
 
-`config.json` is optional. Unknown keys are refused. An empty file, or no file, means the defaults.
+`config.json` is optional. Unknown keys are refused. Omit the file or use an empty JSON object (`{}`) for defaults. A zero-byte or whitespace-only file is invalid.
 
 ```json
 {
