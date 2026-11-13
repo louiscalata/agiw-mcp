@@ -116,9 +116,12 @@ implemented here. The table does not cover every practice in that guide.
   candidate as data. When Node advertises `--allow-net`, that flag is also set;
   it permits network access generally. Loopback restrictions are enforced by
   application URL validation, not by Node's network permission flag.
-- The model endpoint must be a loopback literal (`127.0.0.1` or `[::1]`) over
-  HTTP, checked by agiw-mcp and again by Nisi's adapter. agiw-mcp cannot verify
-  what the server behind that port does with the data.
+- Configuration accepts IPv4 and IPv6 loopback literals over HTTP. The current
+  Nisi HTTP transport supports only `127.0.0.1`; it rejects `[::1]`. agiw-mcp
+  cannot verify what the server behind that port does with the data.
+- The Nisi adapter rejects model response bodies above 8 MiB after receipt.
+  The current host HTTP transport buffers the entire body before that check,
+  so it does not enforce an 8 MiB memory bound while receiving a response.
 
 ## Threat model
 

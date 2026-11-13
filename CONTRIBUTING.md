@@ -24,6 +24,6 @@ CI also runs `ruff check src tests scripts` (selected rules `E`, `F`, `W`, `B`) 
 
 A pull request that changes install or the MCP entry point should say which install command was run and what `agiw-mcp --version` and the stdio handshake printed. `python3 scripts/stdio_handshake.py agiw-mcp` does that handshake once the command is on `PATH`.
 
-Windows is not in CI. Ticket admission is disabled there. Say so if your change touches it.
+Windows CI runs Python 3.12 and Node.js 22. Ticket admission is refused on Windows, and its admission tests are skipped there. Describe that limitation when a change touches tickets.
 
 Apache-2.0. A contribution is under that license. Third-party material needs its origin and the attribution it requires. See [PROVENANCE.md](PROVENANCE.md) for the files copied from AGIW Suite and Nisi.
