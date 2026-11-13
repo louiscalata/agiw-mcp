@@ -248,6 +248,26 @@ class ConfigTests(IsolatedTestCase):
         with self.assertRaises(ConfigError):
             load_config()
 
+    def test_base_urls_reject_empty_query_and_fragment(self):
+        for name in ("model_base_url", "reviewer_base_url"):
+            for base in ("http://127.0.0.1:9/v1", "http://[::1]:9/v1"):
+                for suffix in ("?", "#"):
+                    with self.subTest(name=name, base=base, suffix=suffix):
+                        self.write_config(**{name: base + suffix})
+                        with self.assertRaises(ConfigError) as ctx:
+                            load_config()
+                        self.assertEqual(ctx.exception.code, "CONFIG_INVALID")
+
+    def test_environment_base_urls_reject_empty_query_and_fragment(self):
+        for name in ("AGIW_MCP_BASE_URL", "AGIW_MCP_MODEL_BASE_URL", "AGIW_MCP_REVIEWER_BASE_URL"):
+            for base in ("http://127.0.0.1:9/v1", "http://[::1]:9/v1"):
+                for suffix in ("?", "#"):
+                    with self.subTest(name=name, base=base, suffix=suffix), \
+                            mock.patch.dict(os.environ, {name: base + suffix}):
+                        with self.assertRaises(ConfigError) as ctx:
+                            load_config()
+                        self.assertEqual(ctx.exception.code, "CONFIG_INVALID")
+
     def test_environment_overrides(self):
         self.write_config(author_model="a")
         os.environ["AGIW_MCP_REVIEWER_MODEL"] = "b"

@@ -7,8 +7,8 @@
 // one JSON request on stdin and writes one JSON result on stdout. Candidate code
 // is parsed by fixed checkers (node --check, Python's compile, JSON.parse) and
 // is never executed. The only network destinations are the configured loopback
-// chat endpoints (author, and the reviewer's if it differs), enforced by Nisi's
-// local-chat adapter.
+// chat endpoints (author, and the reviewer's if it differs), enforced here and
+// by Nisi's local-chat adapter.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
@@ -142,7 +142,16 @@ function withReasoningEffort(effort, onReasoningOnly, wireHashes) {
   };
 }
 
+// URL parsing canonicalizes other spellings (decimal, hex, octal or short IPv4, a trailing dot,
+// long IPv6 forms, empty userinfo) to a loopback literal and keeps an empty ? or #. Match the raw
+// string to exactly what configuration accepts before Nisi parses it.
+const LOOPBACK_ENDPOINT = /^[Hh][Tt][Tt][Pp]:\/\/(?:127\.0\.0\.1|\[::1\])(?::[0-9]*)?\/[^?#\\\u0000-\u0020]*$/u;
+const requireLoopbackEndpoint = value => {
+  if (typeof value === 'string' && !LOOPBACK_ENDPOINT.test(value)) fail('LOCAL_CHAT_DESTINATION_REFUSED');
+};
+
 function buildAdapters(request, onReasoningOnly, wireHashes) {
+  requireLoopbackEndpoint(request.endpoint);
   const base = { destination: 'LOOPBACK_HTTP', endpoint: request.endpoint, timeoutMs: request.deadlineMs,
     maxOutputTokens: request.maxOutputTokens, maxRequestBytes: 8 * 1024 * 1024, maxResponseBytes: MAX_RESPONSE_BYTES };
   const innerAuthor = createLocalChatAuthorAdapter({ ...base, model: request.authorModel, id: 'agiw.author',
@@ -150,6 +159,7 @@ function buildAdapters(request, onReasoningOnly, wireHashes) {
   // reviewerEndpoint lets the reviewer use a separate loopback server; it falls back to the author's endpoint.
   const reviewerEndpoint = typeof request.reviewerEndpoint === 'string' && request.reviewerEndpoint
     ? request.reviewerEndpoint : request.endpoint;
+  requireLoopbackEndpoint(reviewerEndpoint);
   const reviewer = createLocalChatReviewerAdapter({ ...base, endpoint: reviewerEndpoint, model: request.reviewerModel, id: 'agiw.reviewer',
     fetch: withReasoningEffort(request.reasoningEffort, () => onReasoningOnly('reviewer'), wireHashes) });
   // Nisi's task record has a fixed schema, so the request text and current file
@@ -185,8 +195,9 @@ function loopbackFetch(url, init = {}) {
   let target;
   try { target = new URL(url); }
   catch { return Promise.reject(Object.assign(new Error('LOCAL_CHAT_ENDPOINT_INVALID'), { code: 'LOCAL_CHAT_ENDPOINT_INVALID' })); }
+  const host = target.hostname === '[::1]' ? '::1' : target.hostname;
   if (target.protocol !== 'http:' || target.username || target.password
-      || (target.hostname !== '127.0.0.1' && target.hostname !== '::1')) {
+      || (host !== '127.0.0.1' && host !== '::1')) {
     return Promise.reject(Object.assign(new Error('LOCAL_CHAT_DESTINATION_REFUSED'), { code: 'LOCAL_CHAT_DESTINATION_REFUSED' }));
   }
   const body = init.body == null ? Buffer.alloc(0) : Buffer.from(init.body);
@@ -195,11 +206,22 @@ function loopbackFetch(url, init = {}) {
     let req;
     try {
       req = httpRequest({
-        hostname: target.hostname, port: target.port, family: target.hostname === '::1' ? 6 : 4,
+        hostname: host, port: target.port, family: host === '::1' ? 6 : 4,
         path: `${target.pathname}${target.search}`, method: init.method || 'POST', headers, signal: init.signal,
       }, res => {
         const chunks = [];
-        res.on('data', chunk => chunks.push(chunk));
+        let total = 0;
+        res.on('data', chunk => {
+          total += chunk.length;
+          if (total > MAX_RESPONSE_BYTES) {
+            chunks.length = 0;
+            reject(Object.assign(new Error('LOCAL_CHAT_RESPONSE_TOO_LARGE'), { code: 'LOCAL_CHAT_RESPONSE_TOO_LARGE' }));
+            res.destroy();
+            req.destroy();
+            return;
+          }
+          chunks.push(chunk);
+        });
         res.on('end', () => {
           const headers = new Headers();
           for (const [name, value] of Object.entries(res.headers)) {

@@ -121,8 +121,8 @@ def validate_loopback_base_url(value, name: str = "model_base_url") -> str:
         raise ValueError(f"{name} has an invalid port") from exc
     if (parts.scheme != "http" or parts.hostname not in ("127.0.0.1", "::1")
             or parts.username is not None or parts.password is not None
-            or parts.query or parts.fragment or "\\" in value or any(ord(c) < 33 for c in value)):
-        raise ValueError(f"{name} must be http://127.0.0.1 or http://[::1] without credentials or query")
+            or "?" in value or "#" in value or "\\" in value or any(ord(c) < 33 for c in value)):
+        raise ValueError(f"{name} must be http://127.0.0.1 or http://[::1] without credentials, query or fragment")
     if port is not None and not 1 <= port <= 65535:
         raise ValueError(f"{name} has an invalid port")
     return value.rstrip("/")
