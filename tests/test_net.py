@@ -74,18 +74,28 @@ class NetTests(IsolatedTestCase):
         listener.listen(1)
         port = listener.getsockname()[1]
         stop = threading.Event()
+        peer_closed = threading.Event()
 
         def trickle():
             conn, _ = listener.accept()
             with conn:
                 conn.recv(65536)
                 conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n")
+                # The read doubles as the 0.2 s pace and as the close detector: the client's FIN shows up as
+                # EOF and a reset as OSError right away, without waiting for a later send to be refused (on
+                # Windows that takes two more sends and, on a loaded runner, can exceed a fixed join).
+                conn.settimeout(0.2)
                 while not stop.is_set():
                     try:
                         conn.sendall(b" ")
+                        if conn.recv(65536) == b"":
+                            break
+                    except TimeoutError:
+                        continue
                     except OSError:
-                        return
-                    time.sleep(0.2)
+                        break
+            if not stop.is_set():
+                peer_closed.set()
 
         thread = threading.Thread(target=trickle, daemon=True)
         thread.start()
@@ -97,8 +107,11 @@ class NetTests(IsolatedTestCase):
         elapsed = time.monotonic() - started
         self.assertEqual(ctx.exception.kind, "timeout")
         self.assertLess(elapsed, 2.0)
-        thread.join(timeout=1)
-        self.assertFalse(thread.is_alive(), "peer connection survived timeout")
+        # stop is set only in cleanup, so the server can see the connection end only because the client
+        # closed it. Poll for that up to a bounded wait instead of asserting after a fixed one-second join.
+        self.assertTrue(peer_closed.wait(timeout=5.0), "peer connection survived timeout")
+        thread.join(timeout=5.0)
+        self.assertFalse(thread.is_alive(), "peer thread did not exit after the close")
         workers = [worker for worker in threading.enumerate() if worker.name == "agiw-mcp-http"]
         for worker in workers:
             worker.join(timeout=1)
