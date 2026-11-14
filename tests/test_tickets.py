@@ -307,6 +307,62 @@ class RegistryTests(IsolatedTestCase):
             self.registry.admit(ticket("T-9", scope=("x",)))
         self.assertEqual(ctx.exception.code, "TICKET_REGISTRY_CORRUPT")
 
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs named pipes")
+    def test_fifo_scope_lock_refuses_without_blocking(self):
+        # A non-regular scope lock must fail closed, not block admission while admit.lock is held.
+        self.root.mkdir(parents=True)
+        fifo = self.root / ("scope-" + "0" * 64 + ".lock")
+        os.mkfifo(fifo, 0o600)
+        outcome = []
+
+        def admit():
+            try:
+                self.registry.admit(ticket("T-9", scope=("x",)))
+                outcome.append("admitted")
+            except ToolError as exc:
+                outcome.append(exc.code)
+
+        worker = threading.Thread(target=admit, daemon=True)
+        worker.start()
+        worker.join(5)
+        if worker.is_alive():  # unblock the reader so the thread can finish
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            worker.join(5)
+            self.fail("admission blocked on a FIFO scope lock")
+        self.assertEqual(outcome, ["TICKET_REGISTRY_CORRUPT"])
+        self.assertFalse((self.root / tickets.ADMIT_LOCK).exists())
+        self.assertEqual(self.registry.admitted(), [])
+
+    def test_oversized_scope_lock_refuses(self):
+        # Scope lock records are bounded like the records recovery reads (MAX_LOCK_BYTES).
+        self.root.mkdir(parents=True)
+        record = {"scope": "elsewhere", "ticketId": "T-0", "owner": "o", "pad": "a" * tickets.MAX_LOCK_BYTES}
+        (self.root / ("scope-" + "1" * 64 + ".lock")).write_text(json.dumps(record))
+        with self.assertRaises(ToolError) as ctx:
+            self.registry.admit(ticket("T-9", scope=("x",)))
+        self.assertEqual(ctx.exception.code, "TICKET_REGISTRY_CORRUPT")
+        self.assertFalse((self.root / tickets.ADMIT_LOCK).exists())
+
+    def test_deeply_nested_scope_lock_refuses(self):
+        # json raises RecursionError (not ValueError) on deep nesting; it must still read as corrupt.
+        self.root.mkdir(parents=True)
+        (self.root / ("scope-" + "2" * 64 + ".lock")).write_text("[" * 4000 + "]" * 4000)
+        with mock.patch.object(tickets.json, "loads", side_effect=RecursionError("deep")):
+            with self.assertRaises(ToolError) as ctx:
+                self.registry.admit(ticket("T-9", scope=("x",)))
+        self.assertEqual(ctx.exception.code, "TICKET_REGISTRY_CORRUPT")
+        self.assertFalse((self.root / tickets.ADMIT_LOCK).exists())
+
+    def test_own_lock_records_fit_the_read_bound(self):
+        # The largest record admit() can write stays below MAX_LOCK_BYTES, so the bound never refuses it.
+        wide = "\U0001F600" * tickets.MAX_SCOPE_CHARS
+        self.registry.admit(ticket("T-" + "9" * 126, scope=(wide,), owner="\U0001F600" * tickets.MAX_OWNER_CHARS))
+        sizes = [p.stat().st_size for p in self.scope_files()]
+        self.assertTrue(sizes and max(sizes) < tickets.MAX_LOCK_BYTES, sizes)
+        with self.assertRaises(ToolError) as ctx:
+            self.registry.admit(ticket("T-2", scope=(wide,)))
+        self.assertEqual(ctx.exception.code, "TICKET_SCOPE_CONFLICT")
+
     def test_case_aliases_conflict(self):
         self.registry.admit(ticket("T-1", scope=("README.md", "Src/Lib")))
         for alias in ("readme.MD", "README.MD", "src", "SRC/lib/x.py", "src/LIB"):
