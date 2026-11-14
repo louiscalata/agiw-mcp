@@ -4,8 +4,10 @@ The latest release is `v0.1.0`. Main contains later fixes and still reports vers
 
 ## Next release
 
-- [ ] Resolve the outstanding public-review findings.
-- [x] Fix Nisi transport IPv6 loopback handling, enforce the 8 MiB response limit during receipt, and reject empty query and fragment delimiters in base URLs.
+- [x] Correct the public documentation found by the public review (#41), and the v0.1.0 release notes, repository description and homepage on GitHub.
+- [x] Fix Nisi transport IPv6 loopback handling, enforce the 8 MiB response limit during receipt, and reject empty query and fragment delimiters in base URLs (#42).
+- [x] Refuse runner endpoint ports outside 1-65535, matching configuration (#43).
+- [ ] Resolve the two remaining public-review findings: commit metadata in published history, and the private scrub definitions listed under Deferred work. Both need an owner decision.
 - [ ] Assign a version and publish a reviewed release containing the changes on main.
 
 ## Validation
