@@ -554,7 +554,7 @@ def _reclaim_stale(root: Path, dir_fd: int | None, name: str) -> bool:
         _LOG.warning("TICKET_LOCK_RECLAIMED kind=%s pid=%d reason=dead_local_owner age_seconds=%d",
                      kind, record["processOwner"]["pid"], int(time.time() - info.st_mtime))
         return True
-    except (OSError, UnicodeError, ValueError):
+    except (OSError, UnicodeError, ValueError, RecursionError):
         return False
     finally:
         os.close(fd)
@@ -582,12 +582,20 @@ def _create_exclusive(root: Path, dir_fd: int | None, name: str, data: bytes) ->
 
 
 def _read(root: Path, dir_fd: int | None, name: str) -> bytes:
+    """A lock record: a regular file of at most MAX_LOCK_BYTES, else ValueError.
+
+    O_NONBLOCK keeps a FIFO or device under a lock name from blocking admission while admit.lock is held."""
     target, at = _at(root, dir_fd, name)
-    fd = os.open(target, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), **at)
+    fd = os.open(target, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), **at)
     try:
-        chunks = []
-        while chunk := os.read(fd, 65536):
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("lock record is not a regular file")
+        chunks, size = [], 0
+        while size <= MAX_LOCK_BYTES and (chunk := os.read(fd, MAX_LOCK_BYTES + 1 - size)):
             chunks.append(chunk)
+            size += len(chunk)
+        if size > MAX_LOCK_BYTES:
+            raise ValueError("lock record is too large")
         return b"".join(chunks)
     finally:
         os.close(fd)
@@ -629,7 +637,7 @@ class Registry:
                 record = json.loads(_read(self.root, dir_fd, name).decode("utf-8"))
             except FileNotFoundError:
                 continue  # released between listing and reading
-            except (OSError, UnicodeError, ValueError):
+            except (OSError, UnicodeError, ValueError, RecursionError):
                 record = None
             if (not isinstance(record, dict) or not isinstance(record.get("scope"), str)
                     or not isinstance(record.get("ticketId"), str)):

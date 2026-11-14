@@ -160,7 +160,10 @@ was truncated, the outcome code, HTTP status, number of flags and elapsed
 milliseconds (`elapsedMs`). It never contains the text or the key. New logs are
 created with mode 0600 on macOS and Linux; an existing log keeps its mode.
 Nisi runs have no per-call log; ticket admission state is
-stored separately. Admission and scope lock records include an HMAC-SHA256 of the machine identity,
+stored separately. Each scope lock record also holds, in plain text, the canonical scope, the
+ticket id and the ticket owner text, inside the mode 0700 ticket state directory; refusals do not
+repeat them. A scope lock that is not a regular file, is larger than 16 KiB, or does not parse is
+refused as `TICKET_REGISTRY_CORRUPT`. Admission and scope lock records include an HMAC-SHA256 of the machine identity,
 PID, an optional HMAC-SHA256 of the process start identity, and creation time. The machine identity is
 Linux `/etc/machine-id` plus the PID namespace, or the macOS host UUID from `gethostuuid`. The start
 identity is the Linux boot id plus the process start time from `/proc/<pid>/stat`, or the macOS
