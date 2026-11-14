@@ -6,8 +6,17 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Nisi runs work with an IPv6 loopback endpoint (`http://[::1]:<port>/...`). The host transport previously refused the bracketed hostname that Node returns. (#42)
+- The host transport refuses a model response body above 8 MiB while receiving it, with `LOCAL_CHAT_RESPONSE_TOO_LARGE`, for both success and error responses. Previously the whole body was buffered before the size check. (#42)
+- Configured base URLs with an empty trailing `?` or `#` are rejected as invalid configuration. (#42)
+- The host runner checks the raw author and reviewer endpoint text before parsing it and refuses spellings that configuration rejects, such as `127.1`, `0x7f.1` or userinfo, with `LOCAL_CHAT_DESTINATION_REFUSED`. (#42)
+- The host runner refuses author and reviewer endpoint ports outside 1-65535 with `LOCAL_CHAT_DESTINATION_REFUSED`, matching configuration. (#43)
+
 ### Documentation
 
+- Correct the README and SECURITY limitations found by a public review: separate author and reviewer model servers, `reasoning_effort` omitted unless set, valid empty configuration, the tagged README's consent limit, and Windows CI coverage in CONTRIBUTING. The roadmap now lists release and validation work instead of session history. (#41)
 - SECURITY.md maps selected MCP security practices to this stdio server and preserves the same-user consent limit.
 - `docs/release-notes/next.md` preserves historical review notes through pull request #21; it is not a complete account of current main. The version stays `0.1.0`.
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
@@ -18,8 +27,8 @@ until a release is assigned. Entries under Unreleased are not a new release.
 ### Tests
 
 - The git-install CI job lists tools with MCP Inspector 2.14.0. It does not call Jev or a model.
-
 - Windows CI runs the scrub check, compile, and unit tests on Python 3.12 and Node 22. Ticket-admission tests are skipped there because admission is refused before the ticket directory is touched.
+- The trickling-server deadline test waits up to a bounded time for the client's close (EOF or reset) instead of a fixed one-second join, which failed once on a busy Windows runner. Test-only; `net.py` is unchanged. (#44)
 
 ### Packaging
 
