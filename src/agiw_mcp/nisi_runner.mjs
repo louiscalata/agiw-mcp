@@ -145,9 +145,20 @@ function withReasoningEffort(effort, onReasoningOnly, wireHashes) {
 // URL parsing canonicalizes other spellings (decimal, hex, octal or short IPv4, a trailing dot,
 // long IPv6 forms, empty userinfo) to a loopback literal and keeps an empty ? or #. Match the raw
 // string to exactly what configuration accepts before Nisi parses it.
-const LOOPBACK_ENDPOINT = /^[Hh][Tt][Tt][Pp]:\/\/(?:127\.0\.0\.1|\[::1\])(?::[0-9]*)?\/[^?#\\\u0000-\u0020]*$/u;
+const LOOPBACK_ENDPOINT = /^[Hh][Tt][Tt][Pp]:\/\/(?:127\.0\.0\.1|\[::1\])(?::([0-9]*))?\/[^?#\\\u0000-\u0020]*$/u;
+// Configuration admits ports 1-65535, zero-padded or not, and an absent or empty port (the default).
+// URL parsing keeps port 0, so the digits are checked here too.
+const admittedPort = digits => {
+  if (digits === undefined || digits === '') return true;
+  const significant = digits.replace(/^0+/u, '');
+  if (significant.length === 0 || significant.length > 5) return false;
+  const port = Number(significant);
+  return port >= 1 && port <= 65535;
+};
 const requireLoopbackEndpoint = value => {
-  if (typeof value === 'string' && !LOOPBACK_ENDPOINT.test(value)) fail('LOCAL_CHAT_DESTINATION_REFUSED');
+  if (typeof value !== 'string') return;
+  const match = LOOPBACK_ENDPOINT.exec(value);
+  if (!match || !admittedPort(match[1])) fail('LOCAL_CHAT_DESTINATION_REFUSED');
 };
 
 function buildAdapters(request, onReasoningOnly, wireHashes) {
@@ -197,7 +208,7 @@ function loopbackFetch(url, init = {}) {
   catch { return Promise.reject(Object.assign(new Error('LOCAL_CHAT_ENDPOINT_INVALID'), { code: 'LOCAL_CHAT_ENDPOINT_INVALID' })); }
   const host = target.hostname === '[::1]' ? '::1' : target.hostname;
   if (target.protocol !== 'http:' || target.username || target.password
-      || (host !== '127.0.0.1' && host !== '::1')) {
+      || (host !== '127.0.0.1' && host !== '::1') || !admittedPort(target.port)) {
     return Promise.reject(Object.assign(new Error('LOCAL_CHAT_DESTINATION_REFUSED'), { code: 'LOCAL_CHAT_DESTINATION_REFUSED' }));
   }
   const body = init.body == null ? Buffer.alloc(0) : Buffer.from(init.body);

@@ -178,6 +178,49 @@ class LoopbackTransportLimitTests(IsolatedTestCase):
                 self.assertEqual(result["report"]["outcome"], "COMPLETED", result)
         self.assertEqual(len(server.calls), 4)
 
+    def test_out_of_range_ports_are_refused(self):
+        # Configuration admits ports 1-65535 only. Port 0 parses under WHATWG URL rules and
+        # out-of-range ports must be refused as a destination before any request is made.
+        v4 = self.serve()
+        v6 = self.serve("::1")
+        for host in ("127.0.0.1", "[::1]"):
+            for port in ("0", "00", "000000", "65536", "99999", "4294967297", "1" * 40):
+                with self.subTest(host=host, port=port):
+                    result, code = self.run_runner(f"http://{host}:{port}/v1/chat/completions")
+                    self.assertEqual(code, 2, result)
+                    self.assertEqual(result["error"], "LOCAL_CHAT_DESTINATION_REFUSED", result)
+        self.assertEqual(v4.calls, [])
+        self.assertEqual(v6.calls, [])
+
+    def test_out_of_range_reviewer_port_is_refused(self):
+        server = self.serve()
+        for port in ("0", "65536"):
+            with self.subTest(port=port):
+                result, code = self.run_runner(self.endpoint(server),
+                                               reviewer_endpoint=f"http://127.0.0.1:{port}/v1/chat/completions")
+                self.assertEqual(code, 2, result)
+                self.assertEqual(result["error"], "LOCAL_CHAT_DESTINATION_REFUSED", result)
+        self.assertEqual(server.calls, [])
+
+    def test_port_range_boundaries_pass_validation(self):
+        # Ports 1 and 65535 (also zero-padded) are admitted. No fake listens there, so the run
+        # fails later at connect, but not as a refused destination or an invalid endpoint.
+        for port in ("1", "65535", "065535"):
+            with self.subTest(port=port):
+                result, _code = self.run_runner(f"http://127.0.0.1:{port}/v1/chat/completions", deadline_ms=1000)
+                self.assertNotEqual(result.get("error"), "LOCAL_CHAT_DESTINATION_REFUSED", result)
+                self.assertNotEqual(result.get("error"), "LOCAL_CHAT_ENDPOINT_INVALID", result)
+
+    def test_configuration_and_runner_agree_on_port_range(self):
+        for port in ("0", "65536", "99999"):
+            with self.subTest(port=port):
+                with self.assertRaises(ValueError):
+                    validate_loopback_base_url(f"http://127.0.0.1:{port}/v1")
+        for port in ("1", "65535", "065535"):
+            with self.subTest(port=port):
+                self.assertEqual(validate_loopback_base_url(f"http://127.0.0.1:{port}/v1"),
+                                 f"http://127.0.0.1:{port}/v1")
+
     def test_non_canonical_ipv6_loopback_spellings_are_refused(self):
         v6 = self.serve("::1")
         port = v6.server_address[1]
