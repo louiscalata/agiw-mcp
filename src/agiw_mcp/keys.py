@@ -9,6 +9,7 @@ returns the value to agiw-mcp, which discards it and never logs or prints it.
 Every failure raises KeyUnavailable with one fixed message; no key, path
 fragment or tool output is ever included. Plaintext key files are not supported.
 """
+
 from __future__ import annotations
 
 import os
@@ -23,8 +24,10 @@ SECURITY_BIN = "/usr/bin/security"
 SECRET_TOOL_CANDIDATES = ("/usr/bin/secret-tool", "/usr/local/bin/secret-tool", "/bin/secret-tool")
 PRESENCE_TIMEOUT = 3.0
 READ_TIMEOUT = 10.0
-KEY_UNAVAILABLE_MESSAGE = ("No usable TypeSafe API key is available. Store one as described under "
-                           "'Jev key and consent' in the README's Setup details, then try again.")
+KEY_UNAVAILABLE_MESSAGE = (
+    "No usable TypeSafe API key is available. Store one as described under "
+    "'Jev key and consent' in the README's Setup details, then try again."
+)
 _KEY_SHAPE = re.compile(r"[\x21-\x7e]{8,512}\Z")
 
 
@@ -55,8 +58,14 @@ def _secret_tool() -> str | None:
 def _run_status(argv: list[str], timeout: float) -> int | None:
     """Run a lookup with all output discarded; return its exit code only."""
     try:
-        done = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, timeout=timeout, check=False)
+        done = subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
     return done.returncode
@@ -68,15 +77,19 @@ def key_presence(config: Config) -> dict:
         return {"present": True, "source": "environment"}
     platform = _platform()
     if platform == "darwin" and os.path.isfile(SECURITY_BIN):
-        code = _run_status([SECURITY_BIN, "find-generic-password", "-s", config.keychain_service,
-                            "-a", config.keychain_account], PRESENCE_TIMEOUT)
+        code = _run_status(
+            [SECURITY_BIN, "find-generic-password", "-s", config.keychain_service, "-a", config.keychain_account],
+            PRESENCE_TIMEOUT,
+        )
         if code == 0:
             return {"present": True, "source": "macos-keychain"}
     if platform == "linux":
         tool = _secret_tool()
         if tool:
-            code = _run_status([tool, "lookup", "service", config.keychain_service,
-                                "account", config.keychain_account], PRESENCE_TIMEOUT)
+            code = _run_status(
+                [tool, "lookup", "service", config.keychain_service, "account", config.keychain_account],
+                PRESENCE_TIMEOUT,
+            )
             if code == 0:
                 return {"present": True, "source": "secret-service"}
     return {"present": False, "source": None}
@@ -98,8 +111,14 @@ def _clean(raw: bytes) -> str:
 
 def _run_read(argv: list[str]) -> str:
     try:
-        done = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, timeout=READ_TIMEOUT, check=False)
+        done = subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=READ_TIMEOUT,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError, ValueError):
         raise KeyUnavailable() from None
     if done.returncode != 0 or len(done.stdout) > 4096:
@@ -115,11 +134,11 @@ def read_key(config: Config) -> str:
         return env_value
     platform = _platform()
     if platform == "darwin" and os.path.isfile(SECURITY_BIN):
-        return _run_read([SECURITY_BIN, "find-generic-password", "-s", config.keychain_service,
-                          "-a", config.keychain_account, "-w"])
+        return _run_read(
+            [SECURITY_BIN, "find-generic-password", "-s", config.keychain_service, "-a", config.keychain_account, "-w"]
+        )
     if platform == "linux":
         tool = _secret_tool()
         if tool:
-            return _run_read([tool, "lookup", "service", config.keychain_service,
-                              "account", config.keychain_account])
+            return _run_read([tool, "lookup", "service", config.keychain_service, "account", config.keychain_account])
     raise KeyUnavailable()

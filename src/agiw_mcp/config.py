@@ -23,6 +23,7 @@ the home directory), so whoever sets the server's launch environment can select
 a file that sets it.
 The Jev endpoint is not configurable.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -49,12 +50,28 @@ DEFAULT_MAX_OUTPUT_TOKENS = 4096
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}\Z")
 _ITEM_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _JEV_MODEL = re.compile(r"jev-(?:latest|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\Z")
-_KEYS = frozenset({"model_base_url", "reviewer_base_url", "author_model", "reviewer_model", "keychain_service",
-                   "keychain_account", "jev_model", "max_output_tokens", "reasoning_effort",
-                   "require_ticket", "allow_unsandboxed_nisi"})
-_ENV = {"model_base_url": "AGIW_MCP_BASE_URL", "author_model": "AGIW_MCP_AUTHOR_MODEL",
-        "reviewer_model": "AGIW_MCP_REVIEWER_MODEL", "reasoning_effort": "AGIW_MCP_REASONING_EFFORT",
-        "reviewer_base_url": "AGIW_MCP_REVIEWER_BASE_URL"}
+_KEYS = frozenset(
+    {
+        "model_base_url",
+        "reviewer_base_url",
+        "author_model",
+        "reviewer_model",
+        "keychain_service",
+        "keychain_account",
+        "jev_model",
+        "max_output_tokens",
+        "reasoning_effort",
+        "require_ticket",
+        "allow_unsandboxed_nisi",
+    }
+)
+_ENV = {
+    "model_base_url": "AGIW_MCP_BASE_URL",
+    "author_model": "AGIW_MCP_AUTHOR_MODEL",
+    "reviewer_model": "AGIW_MCP_REVIEWER_MODEL",
+    "reasoning_effort": "AGIW_MCP_REASONING_EFFORT",
+    "reviewer_base_url": "AGIW_MCP_REVIEWER_BASE_URL",
+}
 REASONING_EFFORTS = ("none", "low", "medium", "high")
 
 
@@ -98,7 +115,7 @@ def display_path(path) -> str:
             return text
         return "~" if relative == "" else "~/" + relative
     if home and home not in ("/", "\\") and (text == home or text.startswith(home + os.sep)):
-        return "~" + text[len(home):]
+        return "~" + text[len(home) :]
     return text
 
 
@@ -111,10 +128,9 @@ def _relative_to_home(text: str, home: str) -> str | None:
     home_parts = _split_display_path(home)
     if not home_parts or len(text_parts) < len(home_parts):
         return None
-    if not all(text_parts[index].casefold() == home_parts[index].casefold()
-               for index in range(len(home_parts))):
+    if not all(text_parts[index].casefold() == home_parts[index].casefold() for index in range(len(home_parts))):
         return None
-    return "/".join(text_parts[len(home_parts):])
+    return "/".join(text_parts[len(home_parts) :])
 
 
 def validate_loopback_base_url(value, name: str = "model_base_url") -> str:
@@ -126,9 +142,16 @@ def validate_loopback_base_url(value, name: str = "model_base_url") -> str:
         port = parts.port
     except ValueError as exc:
         raise ValueError(f"{name} has an invalid port") from exc
-    if (parts.scheme != "http" or parts.hostname not in ("127.0.0.1", "::1")
-            or parts.username is not None or parts.password is not None
-            or "?" in value or "#" in value or "\\" in value or any(ord(c) < 33 for c in value)):
+    if (
+        parts.scheme != "http"
+        or parts.hostname not in ("127.0.0.1", "::1")
+        or parts.username is not None
+        or parts.password is not None
+        or "?" in value
+        or "#" in value
+        or "\\" in value
+        or any(ord(c) < 33 for c in value)
+    ):
         raise ValueError(f"{name} must be http://127.0.0.1 or http://[::1] without credentials, query or fragment")
     if port is not None and not 1 <= port <= 65535:
         raise ValueError(f"{name} has an invalid port")
@@ -177,20 +200,27 @@ class Config:
         return self.model_base_url + "/models"
 
     def public(self) -> dict:
-        return {"model_base_url": self.model_base_url, "author_model": self.author_model,
-                "reviewer_model": self.reviewer_model, "keychain_service": self.keychain_service,
-                "keychain_account": self.keychain_account, "jev_model": self.jev_model,
-                "max_output_tokens": self.max_output_tokens, "reasoning_effort": self.reasoning_effort,
-                "require_ticket": self.require_ticket, "reviewer_base_url": self.reviewer_base_url,
-                "allow_unsandboxed_nisi": self.allow_unsandboxed_nisi,
-                "source": self.source}
+        return {
+            "model_base_url": self.model_base_url,
+            "author_model": self.author_model,
+            "reviewer_model": self.reviewer_model,
+            "keychain_service": self.keychain_service,
+            "keychain_account": self.keychain_account,
+            "jev_model": self.jev_model,
+            "max_output_tokens": self.max_output_tokens,
+            "reasoning_effort": self.reasoning_effort,
+            "require_ticket": self.require_ticket,
+            "reviewer_base_url": self.reviewer_base_url,
+            "allow_unsandboxed_nisi": self.allow_unsandboxed_nisi,
+            "source": self.source,
+        }
 
 
 class ConfigError(ToolError):
     pass
 
 
-def _validate(values: dict) -> dict:
+def _validate(values: dict) -> dict:  # noqa: C901 - one check per config key
     out = {}
     for key, value in values.items():
         if key == "model_base_url":

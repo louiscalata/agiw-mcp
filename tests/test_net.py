@@ -60,8 +60,10 @@ class NetTests(IsolatedTestCase):
             conn, _ = listener.accept()
             with conn:
                 conn.recv(65536)
-                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                             b"Transfer-Encoding: chunked\r\n\r\n10\r\n{\"data\": [")
+                conn.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    b'Transfer-Encoding: chunked\r\n\r\n10\r\n{"data": ['
+                )
 
         threading.Thread(target=cut_off, daemon=True).start()
         with self.assertRaises(net.HttpFailure) as ctx:

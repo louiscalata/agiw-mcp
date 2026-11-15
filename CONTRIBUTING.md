@@ -20,7 +20,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v
 python3 -m compileall -q src
 ```
 
-CI also runs `ruff check src tests scripts` (selected rules `E`, `F`, `W`, `B`) and installs the built wheel and sdist outside the checkout. The tests do not use the network: model and Jev calls are local fakes, and a socket guard blocks anything else. Node 22 or newer runs the real Nisi runner; without it, a fake runner covers the Python side.
+CI also runs Ruff 0.17.4, pinned: `ruff check src tests scripts` and `ruff format --check src tests scripts`. The rules and layout are in [docs/python-style.md](docs/python-style.md) and `pyproject.toml`. CI also installs the built wheel and sdist outside the checkout. The tests do not use the network: model and Jev calls are local fakes, and a socket guard blocks anything else. Node 22 or newer runs the real Nisi runner; without it, a fake runner covers the Python side.
 
 A pull request that changes install or the MCP entry point should say which install command was run and what `agiw-mcp --version` and the stdio handshake printed. `python3 scripts/stdio_handshake.py agiw-mcp` does that handshake once the command is on `PATH`.
 

@@ -15,7 +15,7 @@ FIXED = "def add(a, b):\n    return a + b\n"
 
 @unittest.skipUnless(node_available(), "Node.js 22+ required for the real runner fixture")
 class ModelResponseTests(IsolatedTestCase):
-    FETCH_FIXTURE = r'''
+    FETCH_FIXTURE = r"""
 import fs from 'node:fs';
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixture.json', import.meta.url), 'utf8'));
 const calls = [];
@@ -47,7 +47,7 @@ globalThis.agiwMcpFetch = async (url, init) => {
   }
   return new Response(raw, { status: 200 });
 };
-'''
+"""
 
     def setUp(self):
         super().setUp()
@@ -56,8 +56,9 @@ globalThis.agiwMcpFetch = async (url, init) => {
         self.bodies = []
         self.parent = self.tmp / "runs"
         self.parent.mkdir()
-        self.write_config(model_base_url="http://127.0.0.1:1235/v1", author_model="author-model",
-                          reviewer_model="reviewer-model")
+        self.write_config(
+            model_base_url="http://127.0.0.1:1235/v1", author_model="author-model", reviewer_model="reviewer-model"
+        )
         copy_verified = nisi._copy_verified
         bounded_run = nisi._bounded_run
 
@@ -80,16 +81,24 @@ globalThis.agiwMcpFetch = async (url, init) => {
             self.bodies = json.loads((work / "bodies.json").read_text())
             return done
 
-        for patcher in (mock.patch.object(nisi, "_copy_verified", side_effect=copy_with_fixture),
-                        mock.patch.object(nisi, "_bounded_run", side_effect=run_with_fixture)):
+        for patcher in (
+            mock.patch.object(nisi, "_copy_verified", side_effect=copy_with_fixture),
+            mock.patch.object(nisi, "_bounded_run", side_effect=run_with_fixture),
+        ):
             patcher.start()
             self.addCleanup(patcher.stop)
 
     def run_tool(self, **extra):
         with mock.patch.object(nisi.tempfile, "tempdir", str(self.parent)):
-            result = tools.call_tool("agiw_nisi_run", {"task": "Fix addition", "repair_budget": 0,
-                                     "files": [{"path": "calc.py", "content": "def add(a, b): return a - b\n"}],
-                                     **extra})
+            result = tools.call_tool(
+                "agiw_nisi_run",
+                {
+                    "task": "Fix addition",
+                    "repair_budget": 0,
+                    "files": [{"path": "calc.py", "content": "def add(a, b): return a - b\n"}],
+                    **extra,
+                },
+            )
         self.assertEqual(list(self.parent.iterdir()), [], "run directory was not removed")
         return result
 
@@ -117,8 +126,12 @@ globalThis.agiwMcpFetch = async (url, init) => {
     def test_reasoning_effort_is_sent_only_when_configured(self):
         for effort in (None, "none", "high"):
             with self.subTest(effort=effort):
-                self.write_config(model_base_url="http://127.0.0.1:1235/v1", author_model="author-model",
-                                  reviewer_model="reviewer-model", reasoning_effort=effort)
+                self.write_config(
+                    model_base_url="http://127.0.0.1:1235/v1",
+                    author_model="author-model",
+                    reviewer_model="reviewer-model",
+                    reasoning_effort=effort,
+                )
                 result, is_error = self.run_tool()
                 self.assertFalse(is_error, result)
                 self.assertTrue(result["completed"], result)
@@ -135,11 +148,19 @@ globalThis.agiwMcpFetch = async (url, init) => {
         self.assert_reasoning_refusal(*self.run_tool(), "author-model")
 
     def test_reasoning_only_author_response_is_refused(self):
-        for content, missing, effort in (("", False, None), (None, False, "high"),
-                                         (" \n", False, "none"), ("", True, None)):
+        for content, missing, effort in (
+            ("", False, None),
+            (None, False, "high"),
+            (" \n", False, "none"),
+            ("", True, None),
+        ):
             with self.subTest(content=content, missing=missing, effort=effort):
-                self.write_config(model_base_url="http://127.0.0.1:1235/v1", author_model="author-model",
-                                  reviewer_model="reviewer-model", reasoning_effort=effort)
+                self.write_config(
+                    model_base_url="http://127.0.0.1:1235/v1",
+                    author_model="author-model",
+                    reviewer_model="reviewer-model",
+                    reasoning_effort=effort,
+                )
                 self.response_shape("draft", content=content, missing=missing)
                 self.assert_reasoning_refusal(*self.run_tool(), "author-model")
                 self.assertEqual(self.calls, [["draft", "author-model"]])

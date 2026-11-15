@@ -5,6 +5,7 @@
 Nothing here is sent anywhere. Fields are allowlisted and typed, so task or
 report text cannot reach the file. A write failure never fails the tool.
 """
+
 from __future__ import annotations
 
 import datetime as dt

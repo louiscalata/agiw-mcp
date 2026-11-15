@@ -6,6 +6,7 @@ Redirects are refused, proxy settings are ignored, every request has one total
 deadline, response bodies are size-capped, and in test mode any URL whose host
 is not a loopback literal is refused before a socket opens.
 """
+
 from __future__ import annotations
 
 import http.client
@@ -107,12 +108,18 @@ def guard(url: str) -> None:
 def _opener():
     # Never use HTTP(S)_PROXY or system proxies: loopback traffic stays local, and the Jev request goes
     # straight to the endpoint named in the consent disclosure.
-    return urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}),
-                                       _HTTPHandler(), _HTTPSHandler())
+    return urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}), _HTTPHandler(), _HTTPSHandler())
 
 
-def request_json(url: str, *, method: str = "GET", body: dict | None = None, headers: dict | None = None,
-                 timeout: float, max_bytes: int) -> tuple[int, object]:
+def request_json(
+    url: str,
+    *,
+    method: str = "GET",
+    body: dict | None = None,
+    headers: dict | None = None,
+    timeout: float,
+    max_bytes: int,
+) -> tuple[int, object]:
     """Send one request and parse a JSON response. Never retries.
 
     ``timeout`` bounds the whole exchange (connect, headers and body), not only each socket read, so a
@@ -136,7 +143,7 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
             with _opener().open(req, timeout=timeout) as resp:
                 outcome["raw"] = resp.read(max_bytes + 1)
                 outcome["status"] = resp.status
-        except BaseException as exc:  # noqa: B036 - handed to the caller's thread below
+        except BaseException as exc:  # noqa: BLE001 - handed to the caller's thread below
             outcome["error"] = exc
         finally:
             active.cancel()
@@ -163,7 +170,7 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
         status = exc.code
         try:
             exc.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - closing the error body is best effort; the HTTP status is raised below
             pass
         raise HttpFailure("http", status) from None
     except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
@@ -173,8 +180,7 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     if len(raw) > max_bytes:
         raise HttpFailure("too_large", status)
     try:
-        parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique,
-                            parse_constant=_reject_constant)
+        parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_reject_constant)
     except (UnicodeError, ValueError):
         raise HttpFailure("invalid_json", status) from None
     return status, parsed

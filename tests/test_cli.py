@@ -14,8 +14,14 @@ from agiw_mcp import __main__ as cli, __version__, consent, readiness, tools
 
 class CliTests(IsolatedTestCase):
     def invoke(self, *args):
-        return subprocess.run([sys.executable, "-B", "-m", "agiw_mcp", *args], input=b"", capture_output=True,
-                              cwd=str(ROOT), env=subprocess_env(self.config_dir), timeout=10)
+        return subprocess.run(
+            [sys.executable, "-B", "-m", "agiw_mcp", *args],
+            input=b"",
+            capture_output=True,
+            cwd=str(ROOT),
+            env=subprocess_env(self.config_dir),
+            timeout=10,
+        )
 
     def test_version(self):
         done = self.invoke("--version")
@@ -35,18 +41,21 @@ class CliTests(IsolatedTestCase):
 
     def test_readiness_exit_codes(self):
         for status, expected in (("READY", 0), ("NOT_READY", 1)):
-            with self.subTest(status=status), \
-                    mock.patch.object(readiness, "evaluate", return_value={"status": status}) as probe, \
-                    mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+            with (
+                self.subTest(status=status),
+                mock.patch.object(readiness, "evaluate", return_value={"status": status}) as probe,
+                mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+            ):
                 code = cli.main(["readiness"])
                 self.assertEqual(code, expected)
                 self.assertEqual(json.loads(output.getvalue()), {"status": status})
                 probe.assert_called_once_with(stop_at_first=True)
 
     def test_status(self):
-        with mock.patch.object(tools, "status_tool",
-                               return_value={"config": None, "configError": "broken"}) as status, \
-                mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+        with (
+            mock.patch.object(tools, "status_tool", return_value={"config": None, "configError": "broken"}) as status,
+            mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+        ):
             self.assertEqual(cli.main(["status"]), 0)
         status.assert_called_once_with({})
         self.assertEqual(json.loads(output.getvalue()), {"config": None, "configError": "broken"})

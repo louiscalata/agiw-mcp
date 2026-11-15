@@ -6,6 +6,7 @@ Consent is bound to a SHA-256 of the exact disclosure below. If a later
 version changes what is sent, the stored consent no longer matches and the Jev
 tools refuse until consent is granted again.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -89,8 +90,12 @@ def _read() -> dict | None:
 
 def consent_recorded() -> bool:
     record = _read()
-    return bool(record and record.get("schema") == 1 and record.get("granted") is True
-                and record.get("disclosureSha256") == disclosure_sha256())
+    return bool(
+        record
+        and record.get("schema") == 1
+        and record.get("granted") is True
+        and record.get("disclosureSha256") == disclosure_sha256()
+    )
 
 
 def _now() -> str:
@@ -100,21 +105,31 @@ def _now() -> str:
 def show() -> dict:
     record = _read() or {}
     stale = bool(record.get("granted") is True and record.get("disclosureSha256") != disclosure_sha256())
-    return {"granted": consent_recorded(), "staleConsent": stale, "endpoint": JEV_ENDPOINT,
-            "disclosure": disclosure_text(), "disclosureSha256": disclosure_sha256(),
-            "consentFile": display_path(_path()),
-            "howToGrant": ("To grant consent after reading this disclosure, run "
-                           "`agiw-mcp consent grant` in a terminal. This tool cannot grant it.")}
+    return {
+        "granted": consent_recorded(),
+        "staleConsent": stale,
+        "endpoint": JEV_ENDPOINT,
+        "disclosure": disclosure_text(),
+        "disclosureSha256": disclosure_sha256(),
+        "consentFile": display_path(_path()),
+        "howToGrant": (
+            "To grant consent after reading this disclosure, run "
+            "`agiw-mcp consent grant` in a terminal. This tool cannot grant it."
+        ),
+    }
 
 
 def grant(disclosure_hash) -> dict:
     if disclosure_hash != disclosure_sha256():
-        raise ToolError("DISCLOSURE_MISMATCH",
-                        "Consent was not recorded. Call agiw_consent with action \"show\", let the user read the "
-                        "disclosure, then run `agiw-mcp consent grant` in a terminal if they agree.")
+        raise ToolError(
+            "DISCLOSURE_MISMATCH",
+            'Consent was not recorded. Call agiw_consent with action "show", let the user read the '
+            "disclosure, then run `agiw-mcp consent grant` in a terminal if they agree.",
+        )
     try:
-        write_private_json(_path(), {"schema": 1, "granted": True, "grantedAt": _now(),
-                                     "disclosureSha256": disclosure_sha256()})
+        write_private_json(
+            _path(), {"schema": 1, "granted": True, "grantedAt": _now(), "disclosureSha256": disclosure_sha256()}
+        )
     except OSError:
         raise ToolError("CONSENT_WRITE_FAILED", "Consent could not be saved in the config directory.") from None
     return {"granted": True, "disclosureSha256": disclosure_sha256(), "consentFile": display_path(_path())}

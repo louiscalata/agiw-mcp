@@ -21,9 +21,30 @@ _SKIP_ADMISSION = unittest.skipIf(
     sys.platform == "win32",
     "ticket admission is refused on Windows before the ticket directory is touched",
 )
-WINDOWS_ALIASES = ("calc.py.", "calc.py ", "src./a.py", "src /a.py", "a/b.", "a/b..", "CON", "con.txt",
-                   "src/NUL.tar.gz", "Com1", "lpt9.log", "aux ", "con .txt", "PRN", "COM¹", "conin$",
-                   "a:b", "calc.py:stream", "c:", "src/a.py::$DATA", " src", "src ")
+WINDOWS_ALIASES = (
+    "calc.py.",
+    "calc.py ",
+    "src./a.py",
+    "src /a.py",
+    "a/b.",
+    "a/b..",
+    "CON",
+    "con.txt",
+    "src/NUL.tar.gz",
+    "Com1",
+    "lpt9.log",
+    "aux ",
+    "con .txt",
+    "PRN",
+    "COM¹",
+    "conin$",
+    "a:b",
+    "calc.py:stream",
+    "c:",
+    "src/a.py::$DATA",
+    " src",
+    "src ",
+)
 
 
 def ticket(ticket_id="T-1", state="Granted", scope=("src",), owner="writer"):
@@ -43,18 +64,40 @@ class TicketValidationTests(IsolatedTestCase):
             self.assertEqual(ctx.exception.details, {"ticketId": "T-1"})
 
     def test_malformed_tickets(self):
-        cases = [None, "", "T-1", [], {}, 7,
-                 {k: v for k, v in ticket().items() if k != "claimState"},
-                 {k: v for k, v in ticket().items() if k != "writeScope"},
-                 {k: v for k, v in ticket().items() if k != "owner"},
-                 {k: v for k, v in ticket().items() if k != "ticketId"},
-                 {**ticket(), "extra": 1},
-                 ticket(ticket_id=""), ticket(ticket_id="  "), ticket(ticket_id="a/b"), ticket(ticket_id=5),
-                 ticket(state=""), ticket(state=None), ticket(owner=""), ticket(owner=None),
-                 ticket(scope=()), ticket(scope=("",)), ticket(scope=("  ",)), ticket(scope=("a//b",)),
-                 ticket(scope=("../x",)), ticket(scope=("a/./b",)), ticket(scope=("/",)), ticket(scope=(3,)),
-                 ticket(scope=(".",)), ticket(scope=("..",)), ticket(scope=("a/..",)),
-                 ticket(scope=("a\\b",)), {**ticket(), "writeScope": "src"}]
+        cases = [
+            None,
+            "",
+            "T-1",
+            [],
+            {},
+            7,
+            {k: v for k, v in ticket().items() if k != "claimState"},
+            {k: v for k, v in ticket().items() if k != "writeScope"},
+            {k: v for k, v in ticket().items() if k != "owner"},
+            {k: v for k, v in ticket().items() if k != "ticketId"},
+            {**ticket(), "extra": 1},
+            ticket(ticket_id=""),
+            ticket(ticket_id="  "),
+            ticket(ticket_id="a/b"),
+            ticket(ticket_id=5),
+            ticket(state=""),
+            ticket(state=None),
+            ticket(owner=""),
+            ticket(owner=None),
+            ticket(scope=()),
+            ticket(scope=("",)),
+            ticket(scope=("  ",)),
+            ticket(scope=("a//b",)),
+            ticket(scope=("../x",)),
+            ticket(scope=("a/./b",)),
+            ticket(scope=("/",)),
+            ticket(scope=(3,)),
+            ticket(scope=(".",)),
+            ticket(scope=("..",)),
+            ticket(scope=("a/..",)),
+            ticket(scope=("a\\b",)),
+            {**ticket(), "writeScope": "src"},
+        ]
         for case in cases:
             with self.assertRaises(ToolError, msg=repr(case)[:80]) as ctx:
                 tickets.validate(case)
@@ -69,11 +112,33 @@ class TicketValidationTests(IsolatedTestCase):
             self.assertEqual(ctx.exception.details, {"ticketId": "T-1"})
 
     def test_names_resembling_devices_are_accepted(self):
-        scopes = ("console.py", "nul_check.py", "com10", "lpt0.txt", "auxiliary/x", ".gitignore", "a.b.c",
-                  "src/connect.py", "comx.py", "/src/")
-        self.assertEqual(tickets.validate(ticket(scope=scopes))["writeScope"],
-                         ("console.py", "nul_check.py", "com10", "lpt0.txt", "auxiliary/x", ".gitignore", "a.b.c",
-                          "src/connect.py", "comx.py", "src"))
+        scopes = (
+            "console.py",
+            "nul_check.py",
+            "com10",
+            "lpt0.txt",
+            "auxiliary/x",
+            ".gitignore",
+            "a.b.c",
+            "src/connect.py",
+            "comx.py",
+            "/src/",
+        )
+        self.assertEqual(
+            tickets.validate(ticket(scope=scopes))["writeScope"],
+            (
+                "console.py",
+                "nul_check.py",
+                "com10",
+                "lpt0.txt",
+                "auxiliary/x",
+                ".gitignore",
+                "a.b.c",
+                "src/connect.py",
+                "comx.py",
+                "src",
+            ),
+        )
 
     def test_refusals_expose_only_ticket_id(self):
         for state in ("Held", "Requested", "Conflict", "Unknown", "secret-state"):
@@ -123,8 +188,12 @@ class WindowsRefusalTests(IsolatedTestCase):
         boom = mock.Mock(side_effect=AssertionError("filesystem touched on Windows"))
         for patch in (mock.patch.object(tickets.os, "name", "nt"), mock.patch.object(tickets.sys, "platform", "win32")):
             for candidate in (ticket(), ticket(state="Requested"), None):
-                with patch, mock.patch.object(tickets, "_open_dir", boom), \
-                        mock.patch.object(tickets, "validate", boom), self.assertRaises(ToolError) as ctx:
+                with (
+                    patch,
+                    mock.patch.object(tickets, "_open_dir", boom),
+                    mock.patch.object(tickets, "validate", boom),
+                    self.assertRaises(ToolError) as ctx,
+                ):
                     self.registry.admit(candidate)
                 self.assertEqual(ctx.exception.code, "TICKET_UNSUPPORTED_PLATFORM")
                 self.assertIn("Windows", ctx.exception.message)
@@ -147,8 +216,13 @@ class RegistryTests(IsolatedTestCase):
         return sorted(root.glob("scope-*.lock")) if root.exists() else []
 
     def records(self, root=None):
-        return sorted(({k: v for k, v in json.loads(p.read_text()).items() if k != "processOwner"}
-                       for p in self.scope_files(root)), key=lambda r: r["scope"])
+        return sorted(
+            (
+                {k: v for k, v in json.loads(p.read_text()).items() if k != "processOwner"}
+                for p in self.scope_files(root)
+            ),
+            key=lambda r: r["scope"],
+        )
 
     def test_refused_ticket_creates_nothing(self):
         for bad in (ticket(state="Requested"), ticket(scope=()), None, ticket(scope=("ok", "\ud800"))):
@@ -244,8 +318,11 @@ class RegistryTests(IsolatedTestCase):
                 if len(closes) == fail_close_on:
                     raise OSError(errno.EIO, "close failed")
 
-        return [mock.patch.object(tickets.os, "open", fake_open), mock.patch.object(tickets.os, "write", fake_write),
-                mock.patch.object(tickets.os, "close", fake_close)]
+        return [
+            mock.patch.object(tickets.os, "open", fake_open),
+            mock.patch.object(tickets.os, "write", fake_write),
+            mock.patch.object(tickets.os, "close", fake_close),
+        ]
 
     def assert_failed_cleanly(self, **faults):
         patches = self.lock_writes(**faults)
@@ -279,8 +356,13 @@ class RegistryTests(IsolatedTestCase):
         patches = self.lock_writes(chunk=1)
         with patches[0], patches[1], patches[2]:
             self.registry.admit(ticket("T-1", scope=("src/a.py", "docs")))
-        self.assertEqual(self.records(), [{"scope": "docs", "ticketId": "T-1", "owner": "writer"},
-                                          {"scope": "src/a.py", "ticketId": "T-1", "owner": "writer"}])
+        self.assertEqual(
+            self.records(),
+            [
+                {"scope": "docs", "ticketId": "T-1", "owner": "writer"},
+                {"scope": "src/a.py", "ticketId": "T-1", "owner": "writer"},
+            ],
+        )
         with self.assertRaises(ToolError):
             self.registry.admit(ticket("T-2", scope=("src",)))
 
@@ -355,8 +437,8 @@ class RegistryTests(IsolatedTestCase):
 
     def test_own_lock_records_fit_the_read_bound(self):
         # The largest record admit() can write stays below MAX_LOCK_BYTES, so the bound never refuses it.
-        wide = "\U0001F600" * tickets.MAX_SCOPE_CHARS
-        self.registry.admit(ticket("T-" + "9" * 126, scope=(wide,), owner="\U0001F600" * tickets.MAX_OWNER_CHARS))
+        wide = "\U0001f600" * tickets.MAX_SCOPE_CHARS
+        self.registry.admit(ticket("T-" + "9" * 126, scope=(wide,), owner="\U0001f600" * tickets.MAX_OWNER_CHARS))
         sizes = [p.stat().st_size for p in self.scope_files()]
         self.assertTrue(sizes and max(sizes) < tickets.MAX_LOCK_BYTES, sizes)
         with self.assertRaises(ToolError) as ctx:
@@ -640,11 +722,18 @@ class RegistryTests(IsolatedTestCase):
         self.assertEqual(len(self.scope_files()), 2)
 
     def test_other_process_admission_is_respected(self):
-        code = ("import sys; from agiw_mcp import tickets; from pathlib import Path; "
-                "tickets.Registry(Path(sys.argv[1])).admit({'ticketId': 'P-1', 'claimState': 'Active', "
-                "'writeScope': ['src'], 'owner': 'other'}); print('ok', flush=True); sys.stdin.read()")
-        child = subprocess.Popen([sys.executable, "-B", "-c", code, str(self.root)], stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE, env=subprocess_env(self.config_dir), cwd=str(SRC))
+        code = (
+            "import sys; from agiw_mcp import tickets; from pathlib import Path; "
+            "tickets.Registry(Path(sys.argv[1])).admit({'ticketId': 'P-1', 'claimState': 'Active', "
+            "'writeScope': ['src'], 'owner': 'other'}); print('ok', flush=True); sys.stdin.read()"
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-B", "-c", code, str(self.root)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            env=subprocess_env(self.config_dir),
+            cwd=str(SRC),
+        )
         try:
             self.assertEqual(child.stdout.readline().strip(), b"ok")
             with self.assertRaises(ToolError) as ctx:
@@ -674,9 +763,13 @@ class NisiTicketTests(IsolatedTestCase):
     def no_side_effects(self):
         """Patches that fail the test if Nisi probes Node, creates its temp dir or starts a process."""
         boom = mock.Mock(side_effect=AssertionError("side effect before admission"))
-        return [mock.patch.object(nisi, "find_node", boom), mock.patch.object(nisi.tempfile, "mkdtemp", boom),
-                mock.patch.object(nisi.subprocess, "Popen", boom), mock.patch.object(nisi.subprocess, "run", boom),
-                mock.patch.object(nisi, "_run_validated", boom)], boom
+        return [
+            mock.patch.object(nisi, "find_node", boom),
+            mock.patch.object(nisi.tempfile, "mkdtemp", boom),
+            mock.patch.object(nisi.subprocess, "Popen", boom),
+            mock.patch.object(nisi.subprocess, "run", boom),
+            mock.patch.object(nisi, "_run_validated", boom),
+        ], boom
 
     def run_refused(self, args, config=None):
         patches, boom = self.no_side_effects()
@@ -695,8 +788,17 @@ class NisiTicketTests(IsolatedTestCase):
             self.assertEqual(exc.code, "TICKET_NOT_ADMISSIBLE", state)
 
     def test_blank_and_malformed_tickets_refused_without_side_effects(self):
-        for bad in (None, "", {}, [], "T-1", ticket(ticket_id=""), ticket(scope=()), ticket(scope=("",)),
-                    {k: v for k, v in ticket().items() if k != "claimState"}):
+        for bad in (
+            None,
+            "",
+            {},
+            [],
+            "T-1",
+            ticket(ticket_id=""),
+            ticket(scope=()),
+            ticket(scope=("",)),
+            {k: v for k, v in ticket().items() if k != "claimState"},
+        ):
             exc = self.run_refused({**ARGS, "ticket": bad})
             self.assertEqual(exc.code, "TICKET_INVALID", repr(bad)[:60])
 
@@ -787,10 +889,12 @@ class NisiTicketTests(IsolatedTestCase):
         self.assertFalse(self.root.exists())
 
     # A stand-in for a Node whose help lists no permission flag (see docs/design/v0.2.md, L2).
-    FLAGLESS_NODE = ("import sys\n"
-                     "if '--version' in sys.argv: print('v22.0.0'); sys.exit(0)\n"
-                     "if '--help' in sys.argv: print('  --check  syntax check'); sys.exit(0)\n"
-                     "sys.exit(70)\n")
+    FLAGLESS_NODE = (
+        "import sys\n"
+        "if '--version' in sys.argv: print('v22.0.0'); sys.exit(0)\n"
+        "if '--help' in sys.argv: print('  --check  syntax check'); sys.exit(0)\n"
+        "sys.exit(70)\n"
+    )
 
     def flagless_node(self):
         fake = write_fake_node(self.tmp / "flagless", self.FLAGLESS_NODE)
@@ -814,9 +918,12 @@ class NisiTicketTests(IsolatedTestCase):
             seen.append(tickets.registry().admitted())
             return real_probe(node)
 
-        with self.flagless_node(), mock.patch.object(nisi, "permission_base", probe), \
-                mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp, \
-                mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner")) as runner:
+        with (
+            self.flagless_node(),
+            mock.patch.object(nisi, "permission_base", probe),
+            mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp,
+            mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner")) as runner,
+        ):
             with self.assertRaises(ToolError) as ctx:
                 nisi.run({**ARGS, "ticket": ticket("T-1")}, load_config(), temp_parent=str(parent))
         self.assertEqual(ctx.exception.code, "NODE_SANDBOX_UNAVAILABLE")
@@ -841,9 +948,11 @@ class NisiTicketTests(IsolatedTestCase):
         parent = self.tmp / "tmpparent"
         parent.mkdir()
         # mkdtemp is patched so the early check is what refuses, not only the backstop on the final argv.
-        with self.flagless_node(), \
-                mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp, \
-                mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner")) as runner:
+        with (
+            self.flagless_node(),
+            mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp,
+            mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner")) as runner,
+        ):
             with self.assertRaises(ToolError) as ctx:
                 nisi.run({**ARGS, "ticket": ticket("T-1")}, config, temp_parent=str(parent))
         self.assertEqual(ctx.exception.code, "NODE_SANDBOX_UNAVAILABLE")
@@ -859,8 +968,10 @@ class NisiTicketTests(IsolatedTestCase):
         held = tickets.registry()
         held.admit(ticket("HELD", scope=("src",)))
         self.addCleanup(held.release, "HELD")
-        with self.flagless_node() as find, \
-                mock.patch.object(nisi, "permission_base", side_effect=AssertionError("probe")) as probe:
+        with (
+            self.flagless_node() as find,
+            mock.patch.object(nisi, "permission_base", side_effect=AssertionError("probe")) as probe,
+        ):
             with self.assertRaises(ToolError) as ctx:
                 nisi.run({**ARGS, "ticket": ticket("T-2", scope=("other", "src/calc.py"))}, load_config())
         self.assertEqual(ctx.exception.code, "TICKET_SCOPE_CONFLICT")
@@ -871,10 +982,15 @@ class NisiTicketTests(IsolatedTestCase):
     def test_ticket_refusals_come_before_the_sandbox_refusal(self):
         # Flagless Node and default config: every ticket refusal still wins, with no Node process.
         self.write_config(author_model="author-model", reviewer_model="reviewer-model", require_ticket=True)
-        cases = [(dict(ARGS), "TICKET_REQUIRED"), ({**ARGS, "ticket": ticket(state="Held")}, "TICKET_NOT_ADMISSIBLE"),
-                 ({**ARGS, "ticket": ticket(scope=("docs",))}, "TICKET_SCOPE_MISMATCH")]
-        with mock.patch.object(nisi, "find_node", side_effect=AssertionError("find_node")) as find, \
-                mock.patch.object(nisi, "permission_base", side_effect=AssertionError("probe")) as probe:
+        cases = [
+            (dict(ARGS), "TICKET_REQUIRED"),
+            ({**ARGS, "ticket": ticket(state="Held")}, "TICKET_NOT_ADMISSIBLE"),
+            ({**ARGS, "ticket": ticket(scope=("docs",))}, "TICKET_SCOPE_MISMATCH"),
+        ]
+        with (
+            mock.patch.object(nisi, "find_node", side_effect=AssertionError("find_node")) as find,
+            mock.patch.object(nisi, "permission_base", side_effect=AssertionError("probe")) as probe,
+        ):
             for args, code in cases:
                 with self.assertRaises(ToolError) as ctx:
                     nisi.run(args, load_config())
@@ -886,8 +1002,7 @@ class NisiTicketTests(IsolatedTestCase):
     @_SKIP_ADMISSION
     @unittest.skipIf(os.name != "posix", "the stand-in node is a shebang script")
     def test_flagless_node_with_the_opt_out_runs_under_its_ticket(self):
-        self.write_config(author_model="author-model", reviewer_model="reviewer-model",
-                          allow_unsandboxed_nisi=True)
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model", allow_unsandboxed_nisi=True)
         seen = []
 
         def fake_bounded_run(argv, **kwargs):
@@ -908,8 +1023,10 @@ class NisiTicketTests(IsolatedTestCase):
         self.assertFalse(schema["properties"]["ticket"]["additionalProperties"])
 
     def test_tool_refusal_payload_names_only_ticket_id(self):
-        result, is_error = tools.call_tool("agiw_nisi_run", {**ARGS, "ticket": ticket(
-            "T-7", state="Held", scope=("private/scope",), owner="private-owner")})
+        result, is_error = tools.call_tool(
+            "agiw_nisi_run",
+            {**ARGS, "ticket": ticket("T-7", state="Held", scope=("private/scope",), owner="private-owner")},
+        )
         self.assertTrue(is_error)
         self.assertEqual(result["error"]["code"], "TICKET_NOT_ADMISSIBLE")
         self.assertEqual(result["error"]["details"], {"ticketId": "T-7"})

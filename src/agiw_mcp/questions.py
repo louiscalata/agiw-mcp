@@ -7,6 +7,7 @@ holds. ``score`` questions are answered with a position on an ordered scale,
 from 0 (first level) to len(levels) - 1 (last level). The last level is
 always the most concerning one.
 """
+
 from __future__ import annotations
 
 _HARM_LEVELS = [
@@ -26,40 +27,49 @@ QUESTIONS = {
         "blocked": {
             "type": "noul",
             "instructions": "Does `task` depend on something unresolved that should be settled before the work starts?",
-            "criteria": {"true": "An unresolved precondition or blocker is present.",
-                         "false": "No blocker is apparent."},
+            "criteria": {
+                "true": "An unresolved precondition or blocker is present.",
+                "false": "No blocker is apparent.",
+            },
         },
         "underspecified": {
             "type": "noul",
             "instructions": "Is `task` missing scope, inputs or acceptance criteria that the person doing the work would need?",
-            "criteria": {"true": "Important details are missing.",
-                         "false": "It is specific enough to start."},
+            "criteria": {"true": "Important details are missing.", "false": "It is specific enough to start."},
         },
         "repeat_or_disturb": {
             "type": "noul",
             "instructions": "Could following `task` repeat an irreversible action, or start, stop or otherwise disturb something that should be left alone?",
-            "criteria": {"true": "A repeated irreversible action or an unwanted disturbance is plausible.",
-                         "false": "No such action, or it is guarded against."},
+            "criteria": {
+                "true": "A repeated irreversible action or an unwanted disturbance is plausible.",
+                "false": "No such action, or it is guarded against.",
+            },
         },
         "relies_on_reports": {
             "type": "noul",
             "instructions": "Would someone following `task` rely on earlier reports, logs or reviews instead of re-checking the actual files, tests or system state?",
-            "criteria": {"true": "It invites relying on reported claims.",
-                         "false": "It requires re-checking the real artifacts."},
+            "criteria": {
+                "true": "It invites relying on reported claims.",
+                "false": "It requires re-checking the real artifacts.",
+            },
         },
     },
     "post": {
         "self_contradiction": {
             "type": "noul",
             "instructions": "Does the conclusion stated in `report` contradict details reported elsewhere in `report`?",
-            "criteria": {"true": "The conclusion and the details disagree.",
-                         "false": "The conclusion matches the details."},
+            "criteria": {
+                "true": "The conclusion and the details disagree.",
+                "false": "The conclusion matches the details.",
+            },
         },
         "unbacked_claims": {
             "type": "noul",
             "instructions": "Does `report` claim important results (tests pass, bug fixed, safe, no regressions) without pointing to evidence a reader could check?",
-            "criteria": {"true": "Important claims lack checkable evidence.",
-                         "false": "Claims point to checkable evidence."},
+            "criteria": {
+                "true": "Important claims lack checkable evidence.",
+                "false": "Claims point to checkable evidence.",
+            },
         },
         "harm_if_acted_on": {
             "type": "score",
@@ -69,8 +79,10 @@ QUESTIONS = {
         "misclassified": {
             "type": "noul",
             "instructions": "Does `report` treat something as a blocking code defect when a documentation or procedure note would handle it safely, or the reverse?",
-            "criteria": {"true": "A classification (code defect versus procedure note) looks wrong.",
-                         "false": "The classifications look right."},
+            "criteria": {
+                "true": "A classification (code defect versus procedure note) looks wrong.",
+                "false": "The classifications look right.",
+            },
         },
     },
 }

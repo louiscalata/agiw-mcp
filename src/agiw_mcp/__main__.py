@@ -7,6 +7,7 @@ Human commands (never used by MCP clients):
   agiw-mcp readiness | status
   agiw-mcp consent show | grant | revoke
 """
+
 from __future__ import annotations
 
 import json
@@ -95,11 +96,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args == ["readiness"]:
         from .readiness import evaluate
+
         result = evaluate(stop_at_first=True)
         _print(result)
         return 0 if result["status"] == "READY" else 1
     if args == ["status"]:
         from .tools import status_tool
+
         _print(status_tool({}))
         return 0
     if len(args) == 2 and args[0] == "consent":

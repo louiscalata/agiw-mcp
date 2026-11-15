@@ -47,6 +47,7 @@ trusted.
 
 Refusals name only the ticket id, never the owner, the state or the scopes.
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -87,12 +88,19 @@ except ImportError:  # Windows admission is refused before recovery.
 
 _TICKET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 # Win32 device names, reserved in any case and with any extension ("nul.txt", "COM1.tar.gz").
-_WINDOWS_DEVICES = frozenset({"con", "prn", "aux", "nul", "conin$", "conout$"}
-                             | {f"{name}{digit}" for name in ("com", "lpt") for digit in "123456789¹²³"})
+_WINDOWS_DEVICES = frozenset(
+    {"con", "prn", "aux", "nul", "conin$", "conout$"}
+    | {f"{name}{digit}" for name in ("com", "lpt") for digit in "123456789¹²³"}
+)
 # Descriptor-relative lock operations (POSIX); elsewhere the state directory is used by path.
-_DIR_FD = (os.name == "posix" and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
-           and {os.open, os.unlink, os.mkdir, os.stat, os.readlink} <= os.supports_dir_fd
-           and os.stat in os.supports_follow_symlinks and os.listdir in os.supports_fd)
+_DIR_FD = (
+    os.name == "posix"
+    and hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NOFOLLOW")
+    and {os.open, os.unlink, os.mkdir, os.stat, os.readlink} <= os.supports_dir_fd
+    and os.stat in os.supports_follow_symlinks
+    and os.listdir in os.supports_fd
+)
 
 
 def _invalid(message: str, ticket_id: str | None = None) -> ToolError:
@@ -103,9 +111,12 @@ def _invalid(message: str, ticket_id: str | None = None) -> ToolError:
 def _refuse_unsupported_platform() -> None:
     """Windows admission is disabled: the state directory's reparse points, owner and ACL are not checked."""
     if os.name == "nt" or sys.platform == "win32":
-        raise ToolError("TICKET_UNSUPPORTED_PLATFORM", "Ticket admission is disabled on Windows until the "
-                        "ticket state directory gets a reparse-point, ownership and permission check; "
-                        "nothing was admitted.")
+        raise ToolError(
+            "TICKET_UNSUPPORTED_PLATFORM",
+            "Ticket admission is disabled on Windows until the "
+            "ticket state directory gets a reparse-point, ownership and permission check; "
+            "nothing was admitted.",
+        )
 
 
 def _encodable(value: str) -> bool:
@@ -130,8 +141,15 @@ def _part_ok(part: str) -> bool:
 
 def _normalize_scope(value) -> str | None:
     """Canonicalize, strip surrounding '/' and refuse malformed or Win32-aliased parts; None when malformed."""
-    if (not isinstance(value, str) or not value.strip() or value != value.strip() or len(value) > MAX_SCOPE_CHARS
-            or "\\" in value or any(ord(c) < 32 for c in value) or not _encodable(value)):
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or value != value.strip()
+        or len(value) > MAX_SCOPE_CHARS
+        or "\\" in value
+        or any(ord(c) < 32 for c in value)
+        or not _encodable(value)
+    ):
         return None
     key = canonical_scope(value).strip("/")
     if not key or len(key) > MAX_SCOPE_CHARS or "\\" in key or any(ord(c) < 32 for c in key):
@@ -153,8 +171,13 @@ def validate(ticket) -> dict:
     if set(ticket) != TICKET_KEYS:
         raise _invalid("ticket must have exactly ticketId, claimState, writeScope and owner.", ticket_id)
     owner = ticket["owner"]
-    if (not isinstance(owner, str) or not owner.strip() or len(owner) > MAX_OWNER_CHARS or "\x00" in owner
-            or not _encodable(owner)):
+    if (
+        not isinstance(owner, str)
+        or not owner.strip()
+        or len(owner) > MAX_OWNER_CHARS
+        or "\x00" in owner
+        or not _encodable(owner)
+    ):
         raise _invalid("ticket.owner must be non-empty text.", ticket_id)
     state = ticket["claimState"]
     if not isinstance(state, str) or not state.strip():
@@ -166,14 +189,19 @@ def validate(ticket) -> dict:
     for item in scope:
         key = _normalize_scope(item)
         if key is None:
-            raise _invalid("Each ticket.writeScope entry must be a non-empty key or relative path without '.', "
-                           "'..' or empty parts, parts ending in '.' or space, ':', or Windows device names.",
-                           ticket_id)
+            raise _invalid(
+                "Each ticket.writeScope entry must be a non-empty key or relative path without '.', "
+                "'..' or empty parts, parts ending in '.' or space, ':', or Windows device names.",
+                ticket_id,
+            )
         if key not in keys:
             keys.append(key)
     if state not in ADMISSIBLE_STATES:
-        raise ToolError("TICKET_NOT_ADMISSIBLE", "The ticket is not admissible; only 'Granted' or 'Active' "
-                        "tickets may run.", ticketId=ticket_id)
+        raise ToolError(
+            "TICKET_NOT_ADMISSIBLE",
+            "The ticket is not admissible; only 'Granted' or 'Active' tickets may run.",
+            ticketId=ticket_id,
+        )
     return {"ticketId": ticket_id, "claimState": state, "writeScope": tuple(keys), "owner": owner}
 
 
@@ -197,9 +225,13 @@ def _scope_name(key: str) -> str:
 
 
 def _unsafe(ticket_id: str) -> ToolError:
-    return ToolError("TICKET_REGISTRY_UNSAFE", "The ticket state directory must be a directory (not a symlink) "
-                     "owned by this user with mode 0700, below directories that only root or this user can "
-                     "change; nothing was admitted.", ticketId=ticket_id)
+    return ToolError(
+        "TICKET_REGISTRY_UNSAFE",
+        "The ticket state directory must be a directory (not a symlink) "
+        "owned by this user with mode 0700, below directories that only root or this user can "
+        "change; nothing was admitted.",
+        ticketId=ticket_id,
+    )
 
 
 def _trusted_owner(info: os.stat_result) -> bool:
@@ -209,8 +241,11 @@ def _trusted_owner(info: os.stat_result) -> bool:
 def _secure_ancestor(info: os.stat_result) -> bool:
     """A directory no other user can rename entries in: trusted owner, not group/other-writable unless sticky."""
     mode = info.st_mode
-    return (stat.S_ISDIR(mode) and _trusted_owner(info)
-            and (not mode & (stat.S_IWGRP | stat.S_IWOTH) or bool(mode & stat.S_ISVTX)))
+    return (
+        stat.S_ISDIR(mode)
+        and _trusted_owner(info)
+        and (not mode & (stat.S_IWGRP | stat.S_IWOTH) or bool(mode & stat.S_ISVTX))
+    )
 
 
 def _open_child(parent: int, name: str) -> int:
@@ -308,8 +343,11 @@ def _open_dir(root: Path, ticket_id: str) -> int | None:
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
             raise _unsafe(ticket_id) from None
-        raise ToolError("TICKET_REGISTRY_UNAVAILABLE", "The ticket state directory could not be created; "
-                        "nothing was admitted.", ticketId=ticket_id) from None
+        raise ToolError(
+            "TICKET_REGISTRY_UNAVAILABLE",
+            "The ticket state directory could not be created; nothing was admitted.",
+            ticketId=ticket_id,
+        ) from None
     try:
         _check_private(fd, ticket_id)
     except BaseException:
@@ -345,8 +383,13 @@ def _digest_identity(text: str, secret: bytes) -> str:
 
 
 def _secret_mode_ok(info: os.stat_result) -> bool:
-    return (stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid() and info.st_nlink == 1
-            and stat.S_IMODE(info.st_mode) == 0o600 and info.st_size == _LOCK_IDENTITY_SECRET_LEN)
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_uid == os.geteuid()
+        and info.st_nlink == 1
+        and stat.S_IMODE(info.st_mode) == 0o600
+        and info.st_size == _LOCK_IDENTITY_SECRET_LEN
+    )
 
 
 def _read_identity_secret(root: Path, dir_fd: int | None) -> bytes | None:
@@ -441,6 +484,7 @@ def _host_identity(secret: bytes | None) -> str | None:
             if re.fullmatch(r"[0-9a-fA-F]{32}", machine):
                 return _digest_identity("linux:" + machine.lower() + ":" + namespace, secret)
         elif sys.platform == "darwin":
+
             class Timespec(ctypes.Structure):
                 _fields_ = [("seconds", ctypes.c_long), ("nanoseconds", ctypes.c_long)]
 
@@ -468,10 +512,15 @@ def _process_start(pid: int, secret: bytes | None) -> str | None:
         if sys.platform == "darwin":
             # Darwin sys/proc_info.h: PROC_PIDTBSDINFO (3), struct proc_bsdinfo.
             class ProcBSDInfo(ctypes.Structure):
-                _fields_ = [("flags_and_ids", ctypes.c_uint32 * 12),
-                            ("comm", ctypes.c_char * 16), ("name", ctypes.c_char * 32),
-                            ("files_and_groups", ctypes.c_uint32 * 5), ("nice", ctypes.c_int32),
-                            ("start_sec", ctypes.c_uint64), ("start_usec", ctypes.c_uint64)]
+                _fields_ = [
+                    ("flags_and_ids", ctypes.c_uint32 * 12),
+                    ("comm", ctypes.c_char * 16),
+                    ("name", ctypes.c_char * 32),
+                    ("files_and_groups", ctypes.c_uint32 * 5),
+                    ("nice", ctypes.c_int32),
+                    ("start_sec", ctypes.c_uint64),
+                    ("start_usec", ctypes.c_uint64),
+                ]
 
             info = ProcBSDInfo()
             proc_pidinfo = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True).proc_pidinfo
@@ -487,8 +536,12 @@ def _process_start(pid: int, secret: bytes | None) -> str | None:
 
 def _lock_owner(root: Path, dir_fd: int | None) -> dict:
     secret = _identity_secret(root, dir_fd)
-    return {"host": _host_identity(secret), "pid": os.getpid(), "startTime": _process_start(os.getpid(), secret),
-            "createdAt": time.time()}
+    return {
+        "host": _host_identity(secret),
+        "pid": os.getpid(),
+        "startTime": _process_start(os.getpid(), secret),
+        "createdAt": time.time(),
+    }
 
 
 def _dead_owner(record: dict, info: os.stat_result, secret: bytes | None) -> bool:
@@ -497,8 +550,14 @@ def _dead_owner(record: dict, info: os.stat_result, secret: bytes | None) -> boo
         return False
     pid, created = owner.get("pid"), owner.get("createdAt")
     host = _host_identity(secret)
-    if (not host or owner.get("host") != host or type(pid) is not int or not 0 < pid <= 2147483647
-            or type(created) not in (int, float) or not 0 < created <= time.time()):
+    if (
+        not host
+        or owner.get("host") != host
+        or type(pid) is not int
+        or not 0 < pid <= 2147483647
+        or type(created) not in (int, float)
+        or not 0 < created <= time.time()
+    ):
         return False
     # Both the record and filesystem must be old enough (also refuses future timestamps).
     if time.time() - max(created, info.st_mtime) < STALE_LOCK_MIN_AGE_SECONDS:
@@ -551,8 +610,12 @@ def _reclaim_stale(root: Path, dir_fd: int | None, name: str) -> bool:
         os.unlink(target, **at)
         # No scope, user-supplied owner, host identifier, identity key, or arbitrary filename.
         kind = "admission" if name == ADMIT_LOCK else "scope"
-        _LOG.warning("TICKET_LOCK_RECLAIMED kind=%s pid=%d reason=dead_local_owner age_seconds=%d",
-                     kind, record["processOwner"]["pid"], int(time.time() - info.st_mtime))
+        _LOG.warning(
+            "TICKET_LOCK_RECLAIMED kind=%s pid=%d reason=dead_local_owner age_seconds=%d",
+            kind,
+            record["processOwner"]["pid"],
+            int(time.time() - info.st_mtime),
+        )
         return True
     except (OSError, UnicodeError, ValueError, RecursionError):
         return False
@@ -639,10 +702,16 @@ class Registry:
                 continue  # released between listing and reading
             except (OSError, UnicodeError, ValueError, RecursionError):
                 record = None
-            if (not isinstance(record, dict) or not isinstance(record.get("scope"), str)
-                    or not isinstance(record.get("ticketId"), str)):
-                raise ToolError("TICKET_REGISTRY_CORRUPT", "A ticket scope lock could not be read; nothing was "
-                                "admitted. Remove the ticket state directory once no runs are active.")
+            if (
+                not isinstance(record, dict)
+                or not isinstance(record.get("scope"), str)
+                or not isinstance(record.get("ticketId"), str)
+            ):
+                raise ToolError(
+                    "TICKET_REGISTRY_CORRUPT",
+                    "A ticket scope lock could not be read; nothing was "
+                    "admitted. Remove the ticket state directory once no runs are active.",
+                )
             held.append((record["scope"], record["ticketId"]))
         return held
 
@@ -657,14 +726,20 @@ class Registry:
                 if _reclaim_stale(self.root, dir_fd, ADMIT_LOCK):
                     continue
                 if time.monotonic() >= deadline:
-                    raise ToolError("TICKET_REGISTRY_BUSY", "Another admission holds the ticket registry lock "
-                                    "(or a crashed run left it behind); nothing was admitted. Try again, or "
-                                    "remove admit.lock from the ticket state directory if no run is active.",
-                                    ticketId=ticket_id) from None
+                    raise ToolError(
+                        "TICKET_REGISTRY_BUSY",
+                        "Another admission holds the ticket registry lock "
+                        "(or a crashed run left it behind); nothing was admitted. Try again, or "
+                        "remove admit.lock from the ticket state directory if no run is active.",
+                        ticketId=ticket_id,
+                    ) from None
                 time.sleep(0.01)
             except OSError:
-                raise ToolError("TICKET_REGISTRY_UNAVAILABLE", "The ticket registry lock could not be written; "
-                                "nothing was admitted.", ticketId=ticket_id) from None
+                raise ToolError(
+                    "TICKET_REGISTRY_UNAVAILABLE",
+                    "The ticket registry lock could not be written; nothing was admitted.",
+                    ticketId=ticket_id,
+                ) from None
 
     def admit(self, ticket) -> dict:
         """Validate ``ticket`` and register all of its scopes, or none of them.
@@ -681,8 +756,11 @@ class Registry:
             try:
                 identity = _identity(self.root, dir_fd)
                 if identity is None:
-                    raise ToolError("TICKET_REGISTRY_UNAVAILABLE", "The ticket state directory could not be "
-                                    "read; nothing was admitted.", ticketId=ticket_id)
+                    raise ToolError(
+                        "TICKET_REGISTRY_UNAVAILABLE",
+                        "The ticket state directory could not be read; nothing was admitted.",
+                        ticketId=ticket_id,
+                    )
                 names = self._admit_locked(dir_fd, clean)
             except BaseException:
                 if dir_fd is not None:
@@ -698,22 +776,31 @@ class Registry:
         try:
             for scope_key, holder in self._held(dir_fd):
                 if holder == ticket_id or any(overlaps(scope_key, key) for key in clean["writeScope"]):
-                    raise ToolError("TICKET_SCOPE_CONFLICT", "The ticket's write scope overlaps a ticket "
-                                    "that is already admitted; nothing was admitted.", ticketId=ticket_id)
+                    raise ToolError(
+                        "TICKET_SCOPE_CONFLICT",
+                        "The ticket's write scope overlaps a ticket that is already admitted; nothing was admitted.",
+                        ticketId=ticket_id,
+                    )
             process_owner = _lock_owner(self.root, dir_fd)
             for key in clean["writeScope"]:
                 name = _scope_name(key)
-                data = json.dumps({"scope": key, "ticketId": ticket_id, "owner": clean["owner"],
-                                   "processOwner": process_owner}).encode("utf-8")
+                data = json.dumps(
+                    {"scope": key, "ticketId": ticket_id, "owner": clean["owner"], "processOwner": process_owner}
+                ).encode("utf-8")
                 try:
                     _create_exclusive(self.root, dir_fd, name, data)
                 except FileExistsError:
-                    raise ToolError("TICKET_SCOPE_CONFLICT", "The ticket's write scope overlaps a ticket "
-                                    "that is already admitted; nothing was admitted.",
-                                    ticketId=ticket_id) from None
+                    raise ToolError(
+                        "TICKET_SCOPE_CONFLICT",
+                        "The ticket's write scope overlaps a ticket that is already admitted; nothing was admitted.",
+                        ticketId=ticket_id,
+                    ) from None
                 except OSError:
-                    raise ToolError("TICKET_REGISTRY_UNAVAILABLE", "A ticket scope lock could not be "
-                                    "written; nothing was admitted.", ticketId=ticket_id) from None
+                    raise ToolError(
+                        "TICKET_REGISTRY_UNAVAILABLE",
+                        "A ticket scope lock could not be written; nothing was admitted.",
+                        ticketId=ticket_id,
+                    ) from None
                 created.append(name)
         except BaseException:
             for name in created:
@@ -767,4 +854,3 @@ def registry(root: Path | None = None) -> Registry:
         if key not in _REGISTRIES:
             _REGISTRIES[key] = Registry(path)
         return _REGISTRIES[key]
-

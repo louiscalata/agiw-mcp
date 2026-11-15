@@ -8,6 +8,7 @@ Usage: PYTHONPATH=src python3 scripts/suite_compat.py /path/to/agiw-suite
 AGIW Suite does not start agiw-mcp. The shared pieces are the vendored Nisi
 v0.2.0 tree, the LICENSE bytes, and the Jev model and endpoint pin.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -48,8 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     if not (suite / "vendor" / "nisi" / "manifest.json").is_file():
         _fail(f"not an agiw-suite checkout: {suite}")
     try:
-        done = subprocess.run(["git", "-C", str(suite), "rev-parse", "HEAD"],
-                              capture_output=True, text=True, timeout=10, check=True)
+        done = subprocess.run(
+            ["git", "-C", str(suite), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10, check=True
+        )
     except (OSError, subprocess.CalledProcessError):
         _fail("could not read the suite commit")
     sha = done.stdout.strip()
@@ -71,8 +73,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"license {mcp_license}")
     print(f"jev model {DEFAULT_JEV_MODEL}")
     print(f"jev endpoint {JEV_ENDPOINT}")
-    print(f"requires-python agiw-mcp {_requires(REPO / 'pyproject.toml')}; "
-          f"agiw-suite {_requires(suite / 'pyproject.toml')}")
+    print(
+        f"requires-python agiw-mcp {_requires(REPO / 'pyproject.toml')}; "
+        f"agiw-suite {_requires(suite / 'pyproject.toml')}"
+    )
     print("suite compatibility passed")
     return 0
 

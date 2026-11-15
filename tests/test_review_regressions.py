@@ -1,6 +1,7 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
 """Review regressions; no listening sockets or real model calls."""
+
 import io
 import json
 import os
@@ -19,10 +20,12 @@ class ReviewRegressions(IsolatedTestCase):
     @unittest.skipIf(sys.platform == "win32", "this check uses a Unix socket pair")
     def test_http_deadline_closes_headers_and_body_sockets(self):
         import socket
+
         for headers in (False, True):
             with self.subTest(headers=headers):
                 client, peer = socket.socketpair()
                 closed = threading.Event()
+
                 def respond(peer=peer, headers=headers, closed=closed):
                     request = b""
                     try:
@@ -37,12 +40,15 @@ class ReviewRegressions(IsolatedTestCase):
                             closed.set()
                     except OSError:
                         pass
+
                 worker = threading.Thread(target=respond, daemon=True)
                 worker.start()
                 try:
                     # Unix socket pairs have no TCP_NODELAY option; no listening service is needed.
-                    with mock.patch.object(socket, "create_connection", return_value=client), \
-                            mock.patch.object(socket.socket, "setsockopt"):
+                    with (
+                        mock.patch.object(socket, "create_connection", return_value=client),
+                        mock.patch.object(socket.socket, "setsockopt"),
+                    ):
                         with self.assertRaises(net.HttpFailure):
                             net.request_json("http://127.0.0.1/test", timeout=0.05, max_bytes=8192)
                     self.assertTrue(closed.wait(0.3), "HTTP socket survived the deadline")
@@ -60,16 +66,20 @@ class ReviewRegressions(IsolatedTestCase):
 
     def test_jev_failure_does_not_deny_possible_delivery(self):
         self.grant_consent()
-        with mock.patch.object(jev.keys, "read_key", return_value="synthetic-test-key"), \
-                mock.patch.object(jev, "request_json", side_effect=net.HttpFailure("timeout")):
+        with (
+            mock.patch.object(jev.keys, "read_key", return_value="synthetic-test-key"),
+            mock.patch.object(jev, "request_json", side_effect=net.HttpFailure("timeout")),
+        ):
             with self.assertRaises(ToolError) as caught:
                 jev.analyse("pre", "task", config.Config())
         self.assertIn("may have been sent", caught.exception.message)
 
     def test_jev_busy_reports_nothing_sent(self):
         self.grant_consent()
-        with mock.patch.object(jev.keys, "read_key", return_value="synthetic-test-key"), \
-                mock.patch.object(jev, "request_json", side_effect=net.HttpFailure("busy")):
+        with (
+            mock.patch.object(jev.keys, "read_key", return_value="synthetic-test-key"),
+            mock.patch.object(jev, "request_json", side_effect=net.HttpFailure("busy")),
+        ):
             with self.assertRaises(ToolError) as caught:
                 jev.analyse("pre", "task", config.Config())
         self.assertEqual(caught.exception.code, "JEV_BUSY")
@@ -90,8 +100,7 @@ class ReviewRegressions(IsolatedTestCase):
             for path in (part, "src/" + part, part + "/calc.py"):
                 for field in ("files", "new_files"):
                     args = {"task": "edit", "new_files": ["valid.py"]}
-                    args[field] = ([{"path": path, "content": "x"}] if field == "files" else
-                                   [path])
+                    args[field] = [{"path": path, "content": "x"}] if field == "files" else [path]
                     with self.subTest(path=path, field=field):
                         with self.assertRaises(ToolError) as caught:
                             nisi.validate_request(args)
@@ -109,10 +118,16 @@ class ReviewRegressions(IsolatedTestCase):
         cfg = config.Config(author_model="author", reviewer_model="reviewer")
         ticket = {"ticketId": "scope-test", "claimState": "Granted", "owner": "writer", "writeScope": ["src"]}
         for path, field in (("docs/a.py", "files"), ("srcx/a.py", "new_files")):
-            args = {"task": "edit", "ticket": ticket, field: [{"path": path, "content": "x"}]
-                    if field == "files" else [path]}
-            with self.subTest(path=path), mock.patch.object(nisi, "_run_validated") as run, \
-                    mock.patch.object(tickets, "registry") as registry:
+            args = {
+                "task": "edit",
+                "ticket": ticket,
+                field: [{"path": path, "content": "x"}] if field == "files" else [path],
+            }
+            with (
+                self.subTest(path=path),
+                mock.patch.object(nisi, "_run_validated") as run,
+                mock.patch.object(tickets, "registry") as registry,
+            ):
                 with self.assertRaises(ToolError) as caught:
                     nisi.run(args, cfg)
                 self.assertEqual(caught.exception.code, "TICKET_SCOPE_MISMATCH")
@@ -123,8 +138,9 @@ class ReviewRegressions(IsolatedTestCase):
 
     def test_successful_child_is_not_killed_after_reaping(self):
         with mock.patch.object(nisi, "_kill_tree") as kill:
-            result = nisi._bounded_run([sys.executable, "-I", "-S", "-B", "-c", "print('ok')"],
-                                       data=b"", cwd=str(self.tmp), env={}, timeout=3)
+            result = nisi._bounded_run(
+                [sys.executable, "-I", "-S", "-B", "-c", "print('ok')"], data=b"", cwd=str(self.tmp), env={}, timeout=3
+            )
         self.assertEqual(result[0], 0)
         self.assertEqual(result[2], "exited")
         self.assertEqual(result[1].replace(b"\r\n", b"\n"), b"ok\n")
@@ -132,8 +148,12 @@ class ReviewRegressions(IsolatedTestCase):
 
     def test_consent_prompt_eof_and_interrupt_record_nothing(self):
         for error in (EOFError, KeyboardInterrupt):
-            with self.subTest(error=error.__name__), mock.patch("sys.stdin.isatty", return_value=True), \
-                    mock.patch("builtins.input", side_effect=error), mock.patch("sys.stdout", io.StringIO()):
+            with (
+                self.subTest(error=error.__name__),
+                mock.patch("sys.stdin.isatty", return_value=True),
+                mock.patch("builtins.input", side_effect=error),
+                mock.patch("sys.stdout", io.StringIO()),
+            ):
                 try:
                     result = cli.main(["consent", "grant"])
                 except (EOFError, KeyboardInterrupt) as exc:
@@ -142,8 +162,10 @@ class ReviewRegressions(IsolatedTestCase):
                 self.assertFalse(consent.consent_recorded())
 
     def test_relative_config_has_useful_status_and_readiness(self):
-        with mock.patch.dict(os.environ, {"AGIW_MCP_CONFIG_DIR": "relative"}), \
-                mock.patch.object(nisi, "find_node", return_value=(None, None)):
+        with (
+            mock.patch.dict(os.environ, {"AGIW_MCP_CONFIG_DIR": "relative"}),
+            mock.patch.object(nisi, "find_node", return_value=(None, None)),
+        ):
             result = readiness.evaluate()
             self.assertIn("absolute path", result["missing"]["detail"])
             result = tools.status_tool({})
@@ -168,9 +190,11 @@ class ReviewRegressions(IsolatedTestCase):
 
     def test_local_readiness_does_not_require_jev(self):
         self.write_config(author_model="author", reviewer_model="reviewer")
-        with mock.patch.object(readiness, "check_node", return_value={"id": "node", "ok": True}), \
-                mock.patch.object(readiness, "check_models", return_value={"id": "models", "ok": True}), \
-                mock.patch.object(readiness.keys, "key_presence") as key:
+        with (
+            mock.patch.object(readiness, "check_node", return_value={"id": "node", "ok": True}),
+            mock.patch.object(readiness, "check_models", return_value={"id": "models", "ok": True}),
+            mock.patch.object(readiness.keys, "key_presence") as key,
+        ):
             result = readiness.evaluate()
         self.assertEqual(result["status"], "READY")
         self.assertEqual(result["jev"]["status"], "NOT_READY")
@@ -180,12 +204,15 @@ class ReviewRegressions(IsolatedTestCase):
     def test_http_timeout_workers_are_bounded(self):
         release = threading.Event()
         entered = []
+
         class Response(io.BytesIO):
             status = 200
+
             def read(self, size=-1):
                 entered.append(1)
                 release.wait(2)
                 return b"{}"
+
         try:
             with mock.patch.object(net, "_opener") as opener:
                 opener.return_value.open.side_effect = lambda *a, **kw: Response()
@@ -206,13 +233,26 @@ class RunnerRegressions(IsolatedTestCase):
         work = self.tmp / ("runner-" + str(len(list(self.tmp.iterdir()))))
         work.mkdir()
         nisi._copy_verified(nisi.VENDOR_DIR, work)
-        request = {"schema": 1, "taskText": "change value", "files": [{"path": "a.py", "content": "value = 0\n"}],
-                   "allowedFiles": ["a.py"], "acceptanceCriteria": ["change value"], "assertions": [],
-                   "repairBudget": 0, "deadlineMs": 5000, "endpoint": "http://127.0.0.1:1234/v1/chat/completions",
-                   "authorModel": "author", "reviewerModel": "reviewer", "maxOutputTokens": 1000,
-                   "reasoningEffort": "none", "language": "python", "python": sys.executable, "checkTimeoutMs": 1000}
+        request = {
+            "schema": 1,
+            "taskText": "change value",
+            "files": [{"path": "a.py", "content": "value = 0\n"}],
+            "allowedFiles": ["a.py"],
+            "acceptanceCriteria": ["change value"],
+            "assertions": [],
+            "repairBudget": 0,
+            "deadlineMs": 5000,
+            "endpoint": "http://127.0.0.1:1234/v1/chat/completions",
+            "authorModel": "author",
+            "reviewerModel": "reviewer",
+            "maxOutputTokens": 1000,
+            "reasoningEffort": "none",
+            "language": "python",
+            "python": sys.executable,
+            "checkTimeoutMs": 1000,
+        }
         request.update(changes)
-        harness = '''
+        harness = """
 import { createHash } from 'node:crypto';
 const hashes = [];
 globalThis.agiwMcpFetch = async (_url, init) => {
@@ -228,10 +268,15 @@ globalThis.agiwMcpFetch = async (_url, init) => {
 const write = process.stdout.write.bind(process.stdout);
 process.stdout.write = raw => write(JSON.stringify({...JSON.parse(raw), wireHashes: hashes}));
 await import(RUNNER);
-'''.replace("CANDIDATE", json.dumps(candidate)).replace("RUNNER", json.dumps((work / "runner.mjs").as_uri()))
-        done = subprocess.run([nisi.find_node()[0], "--input-type=module", "-e", harness],
-                              input=json.dumps(request).encode(), capture_output=True, cwd=work,
-                              env=nisi._child_env(nisi.find_node()[0], str(work)), timeout=10)
+""".replace("CANDIDATE", json.dumps(candidate)).replace("RUNNER", json.dumps((work / "runner.mjs").as_uri()))
+        done = subprocess.run(
+            [nisi.find_node()[0], "--input-type=module", "-e", harness],
+            input=json.dumps(request).encode(),
+            capture_output=True,
+            cwd=work,
+            env=nisi._child_env(nisi.find_node()[0], str(work)),
+            timeout=10,
+        )
         self.assertEqual(done.returncode, 0, done.stderr.decode())
         return json.loads(done.stdout)
 
@@ -254,8 +299,12 @@ await import(RUNNER);
         self.assertIsInstance(fingerprint, str)
         self.assertEqual(len(fingerprint), 64)
         self.assertEqual(self.runner()["inputFingerprint"], fingerprint)
-        for changed in ({"taskText": "different"}, {"files": [{"path": "a.py", "content": "value = 99"}]},
-                        {"assertions": [{"path": "a.py", "contains": "value"}]}, {"reasoningEffort": "low"}):
+        for changed in (
+            {"taskText": "different"},
+            {"files": [{"path": "a.py", "content": "value = 99"}]},
+            {"assertions": [{"path": "a.py", "contains": "value"}]},
+            {"reasoningEffort": "low"},
+        ):
             result = self.runner(**changed)
             self.assertNotEqual(result["inputFingerprint"], fingerprint)
             for receipt in result["receipts"]["author"] + result["receipts"]["reviewer"]:
@@ -268,9 +317,10 @@ class LifecycleRegressions(IsolatedTestCase):
         import signal
         import time
         from support import subprocess_env
+
         child = "import os, pathlib, time; pathlib.Path('child-pid').write_text(str(os.getpid())); time.sleep(60)"
         self.write_config(author_model="author", reviewer_model="reviewer", allow_unsandboxed_nisi=True)
-        script = '''
+        script = """
 import sys
 from pathlib import Path
 from agiw_mcp import __main__, nisi
@@ -280,17 +330,34 @@ nisi.permission_flags = lambda *args: ([], 'none')
 nisi._copy_verified = lambda source, work: (work / 'runner.mjs').write_text(CHILD)
 nisi.tempfile.tempdir = PARENT
 sys.exit(__main__.main([]))
-'''.replace("CHILD", repr(child)).replace("PARENT", repr(str(self.tmp)))
+""".replace("CHILD", repr(child)).replace("PARENT", repr(str(self.tmp)))
         for sig in (signal.SIGTERM, signal.SIGHUP):
             with self.subTest(signal=sig):
-                proc = subprocess.Popen([sys.executable, "-B", "-c", script],
-                                        env=subprocess_env(self.config_dir, PYTHONPATH=str(nisi.PACKAGE_DIR.parent)),
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE, stdin=subprocess.PIPE)
-                request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-                    "name": "agiw_nisi_run", "arguments": {"task": "edit", "new_files": ["a.py"],
-                    "ticket": {"ticketId": "shutdown", "claimState": "Granted",
-                               "writeScope": ["a.py"], "owner": "writer"}}}}
+                proc = subprocess.Popen(
+                    [sys.executable, "-B", "-c", script],
+                    env=subprocess_env(self.config_dir, PYTHONPATH=str(nisi.PACKAGE_DIR.parent)),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.PIPE,
+                )
+                request = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "agiw_nisi_run",
+                        "arguments": {
+                            "task": "edit",
+                            "new_files": ["a.py"],
+                            "ticket": {
+                                "ticketId": "shutdown",
+                                "claimState": "Granted",
+                                "writeScope": ["a.py"],
+                                "owner": "writer",
+                            },
+                        },
+                    },
+                }
                 proc.stdin.write(json.dumps(request).encode() + b"\n")
                 proc.stdin.flush()
                 pid = None
@@ -322,6 +389,7 @@ sys.exit(__main__.main([]))
                             pass
                     # Clean the deliberately reproduced pre-fix leftovers before the next case.
                     import shutil
+
                     for path in self.tmp.glob("agiw-mcp-nisi-*"):
                         shutil.rmtree(path)
                     for path in self.config_dir.glob("tickets/scope-*.lock"):
@@ -363,6 +431,7 @@ class CancellationRegressions(IsolatedTestCase):
     def exercise_pending(self, boundary, stop):
         import queue
         from agiw_mcp import rpc
+
         class InputQueue(queue.Queue):
             done_consumed = False
 
@@ -392,15 +461,23 @@ class CancellationRegressions(IsolatedTestCase):
                 trigger = {"done": 1, "sync": 2, "last": 3}[boundary]
                 if reply["id"] == trigger:
                     if stop == "cancel":
-                        cancel = {"jsonrpc": "2.0", "method": "notifications/cancelled",
-                                  "params": {"requestId": target}}
+                        cancel = {
+                            "jsonrpc": "2.0",
+                            "method": "notifications/cancelled",
+                            "params": {"requestId": target},
+                        }
                         events.put(("frame", json.dumps(cancel).encode()))
                     elif stop == "call":
-                        request = {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-                                   "params": {"name": "agiw_jev_pre", "arguments": {"marker": 4}}}
+                        request = {
+                            "jsonrpc": "2.0",
+                            "id": 4,
+                            "method": "tools/call",
+                            "params": {"name": "agiw_jev_pre", "arguments": {"marker": 4}},
+                        }
                         events.put(("frame", json.dumps(request).encode()))
                     else:
                         events.put(("frame", None))
+
             def flush(self):
                 pass
 
@@ -411,12 +488,18 @@ class CancellationRegressions(IsolatedTestCase):
             return real_thread(*args, **kwargs)
 
         for identifier, name in ((1, "agiw_nisi_run"), (2, "agiw_jev_pre"), (3, "agiw_jev_pre")):
-            request = {"jsonrpc": "2.0", "id": identifier, "method": "tools/call",
-                       "params": {"name": name, "arguments": {"marker": identifier}}}
+            request = {
+                "jsonrpc": "2.0",
+                "id": identifier,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": {"marker": identifier}},
+            }
             events.put(("frame", json.dumps(request).encode()))
-        with mock.patch.object(rpc.queue, "Queue", return_value=events), \
-                mock.patch.object(rpc.threading, "Thread", side_effect=thread), \
-                mock.patch.object(rpc, "call_tool", side_effect=tool):
+        with (
+            mock.patch.object(rpc.queue, "Queue", return_value=events),
+            mock.patch.object(rpc.threading, "Thread", side_effect=thread),
+            mock.patch.object(rpc, "call_tool", side_effect=tool),
+        ):
             self.assertEqual(rpc.serve(io.BytesIO(), Output()), 0)
         if stop == "call":
             expected = [1, 2, 3, 4]
@@ -436,28 +519,40 @@ class CancellationRegressions(IsolatedTestCase):
     def exercise_stream(self, cancel):
         import queue
         from agiw_mcp import rpc
+
         entered = threading.Event()
         finished = threading.Event()
         replies = queue.Queue()
+
         class Output:
             def write(self, data):
                 replies.put(json.loads(data))
+
             def flush(self):
                 pass
+
         def tool(_name, _args):
             entered.set()
             try:
-                nisi._bounded_run([sys.executable, "-I", "-S", "-B", "-c", "import time; time.sleep(2)"],
-                                  data=b"", cwd=str(self.tmp), env={}, timeout=5)
+                nisi._bounded_run(
+                    [sys.executable, "-I", "-S", "-B", "-c", "import time; time.sleep(2)"],
+                    data=b"",
+                    cwd=str(self.tmp),
+                    env={},
+                    timeout=5,
+                )
                 return {}, False
             finally:
                 finished.set()
+
         read_fd, write_fd = os.pipe()
         reader = os.fdopen(read_fd, "rb")
         writer = os.fdopen(write_fd, "wb", buffering=0)
         server = threading.Thread(target=rpc.serve, args=(reader, Output()), daemon=True)
+
         def send(value):
             writer.write(json.dumps(value).encode() + b"\n")
+
         with mock.patch.object(rpc, "call_tool", side_effect=tool):
             server.start()
             try:
