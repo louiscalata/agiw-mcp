@@ -21,7 +21,8 @@ also uses a minimal environment.
 An optional claim ticket (required when config require_ticket is true) is
 validated and admitted before any of this starts and released afterwards. A
 ticketed run refused by a Node probe has therefore created its ticket lock
-files and removes them again before returning.
+files and removes them again before returning. A configured check_python is
+probed in the same interval, with isolated flags and a three-second limit.
 """
 
 from __future__ import annotations
@@ -185,7 +186,7 @@ _PROBE_WINDOWS_NAMES = ("SystemRoot", "SYSTEMDRIVE", "WINDIR")
 
 
 def _probe_env() -> dict:
-    """Only what `node --version` and `node --help` need: no keys, proxies or other variables.
+    """Only what Node and syntax-Python probes need: no keys, proxies or other variables.
 
     On Windows, SystemRoot, SYSTEMDRIVE and WINDIR are also passed through when set (matched
     case-insensitively): without SystemRoot, Node 24 aborts with exit 134 initializing its CSPRNG."""
@@ -230,6 +231,30 @@ def find_node() -> tuple[str | None, tuple[int, int, int] | None]:
     if done.returncode != 0 or not match:
         return path, None
     return path, tuple(int(part) for part in match.groups())
+
+
+def probe_check_python(path: str) -> str:
+    """Probe a configured syntax interpreter without exposing its path or output in refusals."""
+    try:
+        done = subprocess.run(
+            [path, "-I", "-S", "-B", "-c", 'import sys; print("%d.%d.%d" % sys.version_info[:3])'],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=3,
+            check=False,
+            env=_probe_env(),
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        done = None
+    match = re.fullmatch(rb"([0-9]+\.[0-9]+\.[0-9]+)(?:\r?\n)?", done.stdout or b"") if done is not None else None
+    if done is None or done.returncode != 0 or match is None:
+        raise ToolError(
+            "CHECK_PYTHON_UNAVAILABLE",
+            "The check_python interpreter could not report X.Y.Z within 3 seconds. "
+            "Set check_python in config.json to a working Python interpreter, or remove the key "
+            "to use the server's interpreter.",
+        ) from None
+    return match.group(1).decode("ascii")
 
 
 _FLAG_CACHE: dict[str, list[str] | None] = {}
@@ -570,7 +595,7 @@ def _parse_output(raw: bytes, request: dict) -> dict:
 def run(args: dict, config: Config, *, temp_parent: str | None = None) -> dict:
     """Validate, admit the claim ticket (if any or if required), run, and release the ticket.
 
-    Admission happens before Node is probed or the temporary directory is created, so a refused
+    Admission happens before Node or check_python is probed or the temporary directory is created, so a refused
     ticket has no side effects."""
     has_ticket = isinstance(args, dict) and "ticket" in args
     if not has_ticket and config.require_ticket:
@@ -613,6 +638,9 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
     # Probed here, after ticket admission (see run) and before the temporary directory exists.
     if permission_base(node) is None and not config.allow_unsandboxed_nisi:
         raise _sandbox_unavailable()
+    python_version = (
+        probe_check_python(config.check_python) if config.check_python is not None else sys.version.split()[0]
+    )
     try:
         verify_vendor()
     except NisiError as exc:
@@ -636,9 +664,9 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
         "maxOutputTokens": config.max_output_tokens,
         "reasoningEffort": config.reasoning_effort,
         "language": request["language"],
-        "python": sys.executable or "",
+        "python": config.check_python if config.check_python is not None else (sys.executable or ""),
         "checkTimeoutMs": 15000,
-        "pythonVersion": sys.version.split()[0],
+        "pythonVersion": python_version,
     }
     workdir = tempfile.mkdtemp(prefix="agiw-mcp-nisi-", dir=temp_parent)
     try:
@@ -682,10 +710,16 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
         result = _parse_output(raw, payload)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
-    return _summarize(result, request, sandbox, config.reasoning_effort)
+    return _summarize(result, request, sandbox, config.reasoning_effort, python_version)
 
 
-def _summarize(result: dict, request: dict, sandbox: str, reasoning_effort: str | None = None) -> dict:
+def _summarize(
+    result: dict,
+    request: dict,
+    sandbox: str,
+    reasoning_effort: str | None = None,
+    python_version: str | None = None,
+) -> dict:
     report = result["report"]
     candidate = report.get("candidate") if isinstance(report.get("candidate"), dict) else None
     original = {item["path"]: item["content"] for item in request["files"]}
@@ -742,7 +776,7 @@ def _summarize(result: dict, request: dict, sandbox: str, reasoning_effort: str 
         "runId": report.get("runId"),
         "taskFingerprint": report.get("taskFingerprint"),
         "inputFingerprint": result.get("inputFingerprint"),
-        "pythonCheckerVersion": sys.version.split()[0],
+        "pythonCheckerVersion": python_version if python_version is not None else sys.version.split()[0],
         "candidateFingerprint": report.get("candidateFingerprint"),
         "modelReceipts": result.get("receipts") if isinstance(result.get("receipts"), dict) else {},
         "nisiVersion": NISI_VERSION,

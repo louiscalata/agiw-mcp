@@ -146,6 +146,18 @@ directory. A Node whose help lists no permission flag is refused with
 `config.json`. Keep that key out of the environment variables and out of the
 tool arguments. A failed `node --help` refuses with `NODE_UNAVAILABLE`.
 
+If `check_python` is set in `config.json`, the run probes that absolute
+interpreter after ticket admission and before temporary-directory creation,
+using fixed `-I -S -B` flags and a 3 second timeout. Only strict `X.Y.Z`
+version output is accepted; this adds no minimum-version gate. Failure returns
+`CHECK_PYTHON_UNAVAILABLE` without the path and releases any admitted ticket.
+The key is not an environment override or tool argument. `null` is invalid;
+control characters C0, DEL and C1 are refused. The Python checker is outside
+Node's permission model, and the selected interpreter and server launch
+environment are trusted. No minimum Python version is enforced for the
+selected interpreter; the checker is tested on Python 3.12 and newer. Older builds reject the key,
+so remove it before downgrading.
+
 The ticket is released when the run ends, including on failure. On Windows,
 admission raises `TICKET_UNSUPPORTED_PLATFORM` before the ticket directory is
 touched. State lives in `tickets/` under the config directory, or in the

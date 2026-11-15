@@ -21,6 +21,8 @@ variable sets it and it is not a tool argument. The environment still chooses
 which config.json is read (AGIW_MCP_CONFIG_DIR, or APPDATA, XDG_CONFIG_HOME and
 the home directory), so whoever sets the server's launch environment can select
 a file that sets it.
+check_python optionally selects an absolute interpreter path for Python syntax
+checks. It is also file-only; an unset key keeps the server's interpreter.
 The Jev endpoint is not configurable.
 """
 
@@ -64,6 +66,7 @@ _KEYS = frozenset(
         "reasoning_effort",
         "require_ticket",
         "allow_unsandboxed_nisi",
+        "check_python",
     }
 )
 _ENV = {
@@ -179,6 +182,8 @@ class Config:
     # Optional separate loopback server for the reviewer; None means use model_base_url.
     reviewer_base_url: str | None = None
     source: str = "defaults"
+    # File-only syntax-check interpreter; None keeps the interpreter running this server.
+    check_python: str | None = None
 
     @property
     def chat_endpoint(self) -> str:
@@ -213,6 +218,7 @@ class Config:
             "require_ticket": self.require_ticket,
             "reviewer_base_url": self.reviewer_base_url,
             "allow_unsandboxed_nisi": self.allow_unsandboxed_nisi,
+            "check_python": display_path(self.check_python) if self.check_python is not None else None,
             "source": self.source,
         }
 
@@ -251,6 +257,17 @@ def _validate(values: dict) -> dict:  # noqa: C901 - one check per config key
         elif key in ("require_ticket", "allow_unsandboxed_nisi"):
             if type(value) is not bool:
                 raise ValueError(f"{key} must be true or false")
+            out[key] = value
+        elif key == "check_python":
+            if (
+                not isinstance(value, str)
+                or not 1 <= len(value) <= 1024
+                or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value)
+                or not Path(value).is_absolute()
+            ):
+                raise ValueError(
+                    "check_python must be an absolute path of 1 to 1024 characters without control characters"
+                )
             out[key] = value
     return out
 
