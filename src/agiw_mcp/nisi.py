@@ -8,12 +8,20 @@ receives a hash-verified copy of Nisi plus the host runner, and is removed after
 Node's version and permission probes receive only PATH, LANG=C.UTF-8 and
 NODE_NO_WARNINGS=1. A failed permission probe refuses the run with
 NODE_UNAVAILABLE. When Node exposes a supported permission flag, the runner
-uses it to limit file access to the temporary directory; otherwise it proceeds
-without permission flags and reports sandbox "none" (no unsupported-model
-refusal is implemented). A comma in the resolved temporary path refuses the
-run with TEMP_DIR_UNSAFE. The runner also uses a minimal environment.
+uses it to limit file access to the temporary directory. When Node's help
+lists no such flag the run is refused with NODE_SANDBOX_UNAVAILABLE, unless
+config allow_unsandboxed_nisi is true; then it proceeds without permission
+flags and reports sandbox "none". Both probes first run before the temporary
+directory is created, so these refusals leave no directory behind. On that
+opt-out path a "no flag" answer is not cached, so `node --help` is asked a
+second time when the flags are built, after the directory exists; a failure
+there still refuses with NODE_UNAVAILABLE and the directory is removed. A comma in
+the resolved temporary path refuses the run with TEMP_DIR_UNSAFE. The runner
+also uses a minimal environment.
 An optional claim ticket (required when config require_ticket is true) is
-validated and admitted before any of this starts and released afterwards.
+validated and admitted before any of this starts and released afterwards. A
+ticketed run refused by a Node probe has therefore created its ticket lock
+files and removes them again before returning.
 """
 from __future__ import annotations
 
@@ -196,12 +204,15 @@ def find_node() -> tuple[str | None, tuple[int, int, int] | None]:
 
 
 _FLAG_CACHE: dict[str, list[str] | None] = {}
+_PERMISSION_SWITCHES = frozenset({"--permission", "--experimental-permission"})
 
 
-def permission_flags(node: str, workdir: str) -> tuple[list[str], str]:
-    """Return Node permission-model flags for this Node, or none if unsupported.
+def permission_base(node: str) -> list[str] | None:
+    """Ask `node --help` which permission-model flags this Node lists; None when it lists none.
 
-    A failed probe is never cached and never means "no sandbox": the run is refused instead."""
+    A failed probe is never cached and never means "no sandbox": NODE_UNAVAILABLE is raised instead.
+    "Lists none" is not cached either, so a Node replaced in place by one that lists the flag is
+    accepted without restarting the server."""
     if node not in _FLAG_CACHE:
         try:
             done = subprocess.run([node, "--help"], stdin=subprocess.DEVNULL, capture_output=True,
@@ -219,10 +230,29 @@ def permission_flags(node: str, workdir: str) -> tuple[list[str], str]:
             base = ["--experimental-permission"]
         else:
             base = None
-        if base is not None and "--allow-net" in text:
+        if base is None:
+            return None
+        if "--allow-net" in text:
             base = base + ["--allow-net"]
         _FLAG_CACHE[node] = base
-    base = _FLAG_CACHE[node]
+    return list(_FLAG_CACHE[node])
+
+
+def sandbox_label(node: str) -> str:
+    """The `sandbox` value a run on this Node would report: "node-permission" or "none"."""
+    return "none" if permission_base(node) is None else "node-permission"
+
+
+def _sandbox_unavailable() -> ToolError:
+    return ToolError("NODE_SANDBOX_UNAVAILABLE", "This Node.js lists no permission-model flag (--permission or "
+                     "--experimental-permission) in `node --help`, so Nisi was not started: it would run without "
+                     "a file-access limit. Use a Node.js that lists the flag, or set \"allow_unsandboxed_nisi\": "
+                     "true in config.json to run without that limit.")
+
+
+def permission_flags(node: str, workdir: str) -> tuple[list[str], str]:
+    """Return the permission-model flags that confine this Node to workdir, or none if unsupported."""
+    base = permission_base(node)
     if base is None:
         return [], "none"
     # Node's Windows permission parser has treated `\` as an escape. `/` names the same path.
@@ -494,6 +524,9 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
     node, version = find_node()
     if not node or not version or version < MIN_NODE:
         raise ToolError("NODE_UNAVAILABLE", "Node.js 22 or newer must be on the PATH of the MCP client.")
+    # Probed here, after ticket admission (see run) and before the temporary directory exists.
+    if permission_base(node) is None and not config.allow_unsandboxed_nisi:
+        raise _sandbox_unavailable()
     try:
         verify_vendor()
     except NisiError as exc:
@@ -527,6 +560,11 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
                             nisiCode=exc.code) from None
         flags, sandbox = permission_flags(node, workdir)
         argv = [node, *flags, os.path.join(workdir, "runner.mjs")]
+        confined = sandbox == "node-permission" and bool(_PERMISSION_SWITCHES.intersection(argv[1:-1]))
+        if not confined and not config.allow_unsandboxed_nisi:
+            # Backstop for the check above, read from the command line itself: never start a runner
+            # whose argv has no permission-model switch.
+            raise _sandbox_unavailable()
         try:
             code, raw, state = _bounded_run(argv, data=json.dumps(payload).encode("utf-8"), cwd=workdir,
                                             env=_child_env(node, workdir), timeout=request["timeout"] + 30)

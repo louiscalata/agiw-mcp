@@ -1,5 +1,6 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
+import copy
 import json
 import os
 import subprocess
@@ -8,11 +9,12 @@ from unittest import mock
 
 from support import IsolatedTestCase, NetworkBlocked
 
-from agiw_mcp import config, consent, keys, net, tools
+from agiw_mcp import config, consent, keys, net, questions, tools
 from agiw_mcp.config import ConfigError, load_config
 from agiw_mcp.errors import ToolError
 
 FAKE_KEY = "tsk_fake_" + "0123456789abcdef"
+PINNED_DISCLOSURE_SHA256 = "6ced7a609a6077f15e1aa3b1f31815225a451aa9c540848c5200e0188d3d1340"
 
 
 class KeyTests(IsolatedTestCase):
@@ -149,6 +151,25 @@ class ConsentTests(IsolatedTestCase):
         with mock.patch.object(consent, "disclosure_sha256", return_value="f" * 64):
             self.assertFalse(consent.consent_recorded())
 
+    def test_disclosure_hash_is_pinned(self):
+        # Stored grants are bound to this hash (consent.consent_recorded), so any edit to DISCLOSURE, the
+        # endpoint, the byte limits or the question text invalidates every grant. That must be deliberate.
+        self.assertEqual(
+            consent.disclosure_sha256(), PINNED_DISCLOSURE_SHA256,
+            "The consent disclosure changed, so every stored grant stops matching. If the change is "
+            "deliberate, update PINNED_DISCLOSURE_SHA256 in this test and add a CHANGELOG line telling "
+            "users to grant consent again. If it is not, revert the edit to consent.py or questions.py.")
+
+    def test_editing_question_text_changes_the_disclosure_hash(self):
+        edited = copy.deepcopy(questions.QUESTIONS)
+        first = next(iter(edited["pre"].values()))
+        first["instructions"] += " "
+        with mock.patch.object(consent, "QUESTIONS", edited):
+            self.assertNotEqual(consent.disclosure_sha256(), PINNED_DISCLOSURE_SHA256)
+        with mock.patch.object(consent, "DISCLOSURE", consent.DISCLOSURE.replace("advisory", "Advisory", 1)):
+            self.assertNotEqual(consent.disclosure_sha256(), PINNED_DISCLOSURE_SHA256)
+        self.assertEqual(consent.disclosure_sha256(), PINNED_DISCLOSURE_SHA256)
+
     def test_consent_tool_actions(self):
         shown, error = tools.call_tool("agiw_consent", {"action": "show"})
         self.assertFalse(error)
@@ -237,6 +258,35 @@ class ConfigTests(IsolatedTestCase):
         self.assertEqual(cfg.model_base_url, "http://127.0.0.1:1234/v1")
         self.assertEqual(cfg.chat_endpoint, "http://127.0.0.1:1234/v1/chat/completions")
         self.assertIsNone(cfg.author_model)
+
+    def test_allow_unsandboxed_nisi_is_a_file_only_boolean(self):
+        self.assertIs(load_config().allow_unsandboxed_nisi, False)
+        self.assertIs(load_config().public()["allow_unsandboxed_nisi"], False)
+        self.write_config(allow_unsandboxed_nisi=True)
+        self.assertIs(load_config().allow_unsandboxed_nisi, True)
+        self.assertIs(load_config().public()["allow_unsandboxed_nisi"], True)
+        for bad in ("true", 1, 0, None, [], {}):
+            self.write_config(allow_unsandboxed_nisi=bad)
+            with self.assertRaises(ConfigError, msg=repr(bad)) as ctx:
+                load_config()
+            self.assertEqual(ctx.exception.code, "CONFIG_INVALID")
+            self.assertIn("allow_unsandboxed_nisi", ctx.exception.message)
+
+    def test_no_environment_variable_sets_allow_unsandboxed_nisi(self):
+        self.assertNotIn("allow_unsandboxed_nisi", config._ENV)
+        for name in ("AGIW_MCP_ALLOW_UNSANDBOXED_NISI", "AGIW_MCP_ALLOW_UNSANDBOXED", "ALLOW_UNSANDBOXED_NISI"):
+            for value in ("1", "true", "True"):
+                with mock.patch.dict(os.environ, {name: value}):
+                    self.assertIs(load_config().allow_unsandboxed_nisi, False, name)
+
+    def test_config_directory_override_selects_the_file_that_sets_the_key(self):
+        # The stated boundary: the launch environment chooses which config.json is read.
+        other = self.tmp / "other-config"
+        other.mkdir()
+        (other / "config.json").write_text(json.dumps({"allow_unsandboxed_nisi": True}), encoding="utf-8")
+        self.assertIs(load_config().allow_unsandboxed_nisi, False)
+        with mock.patch.dict(os.environ, {"AGIW_MCP_CONFIG_DIR": str(other)}):
+            self.assertIs(load_config().allow_unsandboxed_nisi, True)
 
     def test_rejects_non_loopback_and_unknown_keys(self):
         for url in ("http://192.0.2.10:1234/v1", "https://127.0.0.1/v1", "http://localhost:1234/v1",

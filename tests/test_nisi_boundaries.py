@@ -81,6 +81,7 @@ class VendorCopyTests(IsolatedTestCase):
         with mock.patch.object(nisi, "verify_vendor", return_value={}), \
                 mock.patch.object(nisi, "VENDOR_DIR", root), \
                 mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
+                mock.patch.object(nisi, "permission_base", return_value=["--permission"]), \
                 mock.patch.object(nisi, "_bounded_run") as runner:
             with self.assertRaises(ToolError) as ctx:
                 nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(),
@@ -107,10 +108,12 @@ class VendorCopyTests(IsolatedTestCase):
 
 class RunBoundaryTests(IsolatedTestCase):
     def test_run_maps_overflow_to_output_too_large(self):
-        self.write_config(author_model="author-model", reviewer_model="reviewer-model")
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model",
+                          allow_unsandboxed_nisi=True)
         parent = self.tmp / "runs"
         parent.mkdir()
         with mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
+                mock.patch.object(nisi, "permission_base", return_value=None), \
                 mock.patch.object(nisi, "permission_flags", return_value=([], "none")), \
                 mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")):
             with self.assertRaises(ToolError) as ctx:
@@ -118,6 +121,58 @@ class RunBoundaryTests(IsolatedTestCase):
                          temp_parent=str(parent))
         self.assertEqual(ctx.exception.code, "NISI_OUTPUT_TOO_LARGE")
         self.assertEqual(list(parent.iterdir()), [])
+
+    def test_node_probe_precedes_vendor_check_and_temp_dir(self):
+        # "unused-node" is not a program, so the real probe fails: the run stops with NODE_UNAVAILABLE
+        # before the vendored files are verified or a temporary directory is made.
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model")
+        nisi._FLAG_CACHE.clear()
+        with mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
+                mock.patch.object(nisi, "verify_vendor") as verify, \
+                mock.patch.object(nisi.tempfile, "mkdtemp") as mkdtemp:
+            with self.assertRaises(ToolError) as ctx:
+                nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config())
+        self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
+        verify.assert_not_called()
+        mkdtemp.assert_not_called()
+
+    def test_unsandboxed_argv_is_refused_even_if_the_early_probe_passed(self):
+        # Backstop: whatever the early probe said, a run whose final argv has no permission flags is not
+        # started unless the config allows it.
+        parent = self.tmp / "runs"
+        parent.mkdir()
+        for allowed, expected in ((False, "NODE_SANDBOX_UNAVAILABLE"), (True, "NISI_OUTPUT_TOO_LARGE")):
+            self.write_config(author_model="author-model", reviewer_model="reviewer-model",
+                              allow_unsandboxed_nisi=allowed)
+            with self.subTest(allowed=allowed), \
+                    mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
+                    mock.patch.object(nisi, "permission_base", return_value=["--permission"]), \
+                    mock.patch.object(nisi, "permission_flags", return_value=([], "none")), \
+                    mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")) as runner:
+                with self.assertRaises(ToolError) as ctx:
+                    nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(),
+                             temp_parent=str(parent))
+                self.assertEqual(ctx.exception.code, expected)
+                self.assertEqual(runner.called, allowed)
+                self.assertEqual(list(parent.iterdir()), [])
+
+    def test_backstop_reads_the_command_line_not_the_label(self):
+        # A "node-permission" label with no permission flag on the command line is still refused.
+        parent = self.tmp / "runs"
+        parent.mkdir()
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model")
+        for flags in ([], ["--allow-fs-read=/x", "--allow-fs-write=/x"], ["--permission-audit"]):
+            with self.subTest(flags=flags), \
+                    mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
+                    mock.patch.object(nisi, "permission_base", return_value=["--permission"]), \
+                    mock.patch.object(nisi, "permission_flags", return_value=(flags, "node-permission")), \
+                    mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")) as runner:
+                with self.assertRaises(ToolError) as ctx:
+                    nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(),
+                             temp_parent=str(parent))
+                self.assertEqual(ctx.exception.code, "NODE_SANDBOX_UNAVAILABLE")
+                runner.assert_not_called()
+                self.assertEqual(list(parent.iterdir()), [])
 
 
 class SummarizeTests(IsolatedTestCase):

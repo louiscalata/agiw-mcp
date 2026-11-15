@@ -10,7 +10,7 @@ import threading
 import unittest
 from unittest import mock
 
-from support import SRC, IsolatedTestCase, subprocess_env
+from support import SRC, IsolatedTestCase, subprocess_env, write_fake_node
 
 from agiw_mcp import nisi, tickets, tools
 from agiw_mcp.config import load_config
@@ -785,6 +785,121 @@ class NisiTicketTests(IsolatedTestCase):
         request = inner.call_args.args[0]
         self.assertEqual(request, nisi.validate_request(ARGS))
         self.assertFalse(self.root.exists())
+
+    # A stand-in for a Node whose help lists no permission flag (see docs/design/v0.2.md, L2).
+    FLAGLESS_NODE = ("import sys\n"
+                     "if '--version' in sys.argv: print('v22.0.0'); sys.exit(0)\n"
+                     "if '--help' in sys.argv: print('  --check  syntax check'); sys.exit(0)\n"
+                     "sys.exit(70)\n")
+
+    def flagless_node(self):
+        fake = write_fake_node(self.tmp / "flagless", self.FLAGLESS_NODE)
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        return mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0)))
+
+    @_SKIP_ADMISSION
+    @unittest.skipIf(os.name != "posix", "the stand-in node is a shebang script")
+    def test_flagless_node_refusal_releases_the_ticket(self):
+        registry = tickets.registry()
+        registry.admit(ticket("T-0"))
+        registry.release("T-0")
+        settled = sorted(path.name for path in self.root.iterdir())
+        parent = self.tmp / "tmpparent"
+        parent.mkdir()
+        seen = []
+        real_probe = nisi.permission_base
+
+        def probe(node):
+            seen.append(tickets.registry().admitted())
+            return real_probe(node)
+
+        with self.flagless_node(), mock.patch.object(nisi, "permission_base", probe), \
+                mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp, \
+                mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner")) as runner:
+            with self.assertRaises(ToolError) as ctx:
+                nisi.run({**ARGS, "ticket": ticket("T-1")}, load_config(), temp_parent=str(parent))
+        self.assertEqual(ctx.exception.code, "NODE_SANDBOX_UNAVAILABLE")
+        self.assertEqual(seen, [["T-1"]], "the probe must run after admission")
+        mkdtemp.assert_not_called()
+        runner.assert_not_called()
+        self.assertEqual(os.listdir(parent), [])
+        self.assertEqual(tickets.registry().admitted(), [])
+        self.assertEqual(list(self.root.glob("scope-*.lock")), [])
+        self.assertEqual(sorted(path.name for path in self.root.iterdir()), settled)
+        tickets.registry().admit(ticket("T-2"))
+        tickets.registry().release("T-2")
+
+    @_SKIP_ADMISSION
+    @unittest.skipIf(os.name != "posix", "the stand-in node is a shebang script")
+    def test_required_ticket_does_not_opt_out_of_the_sandbox(self):
+        # require_ticket true, an admissible ticket, a flagless Node and the default key: still refused.
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model", require_ticket=True)
+        config = load_config()
+        self.assertTrue(config.require_ticket)
+        self.assertFalse(config.allow_unsandboxed_nisi)
+        parent = self.tmp / "tmpparent"
+        parent.mkdir()
+        # mkdtemp is patched so the early check is what refuses, not only the backstop on the final argv.
+        with self.flagless_node(), \
+                mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp, \
+                mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner")) as runner:
+            with self.assertRaises(ToolError) as ctx:
+                nisi.run({**ARGS, "ticket": ticket("T-1")}, config, temp_parent=str(parent))
+        self.assertEqual(ctx.exception.code, "NODE_SANDBOX_UNAVAILABLE")
+        mkdtemp.assert_not_called()
+        runner.assert_not_called()
+        self.assertEqual(os.listdir(parent), [])
+        self.assertEqual(tickets.registry().admitted(), [])
+        self.assertEqual(list(self.root.glob("scope-*.lock")), [])
+
+    @_SKIP_ADMISSION
+    @unittest.skipIf(os.name != "posix", "the stand-in node is a shebang script")
+    def test_overlapping_ticket_on_flagless_node_is_still_a_scope_conflict(self):
+        held = tickets.registry()
+        held.admit(ticket("HELD", scope=("src",)))
+        self.addCleanup(held.release, "HELD")
+        with self.flagless_node() as find, \
+                mock.patch.object(nisi, "permission_base", side_effect=AssertionError("probe")) as probe:
+            with self.assertRaises(ToolError) as ctx:
+                nisi.run({**ARGS, "ticket": ticket("T-2", scope=("other", "src/calc.py"))}, load_config())
+        self.assertEqual(ctx.exception.code, "TICKET_SCOPE_CONFLICT")
+        find.assert_not_called()
+        probe.assert_not_called()
+        self.assertEqual(held.admitted(), ["HELD"])
+
+    def test_ticket_refusals_come_before_the_sandbox_refusal(self):
+        # Flagless Node and default config: every ticket refusal still wins, with no Node process.
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model", require_ticket=True)
+        cases = [(dict(ARGS), "TICKET_REQUIRED"), ({**ARGS, "ticket": ticket(state="Held")}, "TICKET_NOT_ADMISSIBLE"),
+                 ({**ARGS, "ticket": ticket(scope=("docs",))}, "TICKET_SCOPE_MISMATCH")]
+        with mock.patch.object(nisi, "find_node", side_effect=AssertionError("find_node")) as find, \
+                mock.patch.object(nisi, "permission_base", side_effect=AssertionError("probe")) as probe:
+            for args, code in cases:
+                with self.assertRaises(ToolError) as ctx:
+                    nisi.run(args, load_config())
+                self.assertEqual(ctx.exception.code, code)
+        find.assert_not_called()
+        probe.assert_not_called()
+        self.assertFalse(self.root.exists())
+
+    @_SKIP_ADMISSION
+    @unittest.skipIf(os.name != "posix", "the stand-in node is a shebang script")
+    def test_flagless_node_with_the_opt_out_runs_under_its_ticket(self):
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model",
+                          allow_unsandboxed_nisi=True)
+        seen = []
+
+        def fake_bounded_run(argv, **kwargs):
+            seen.append((tickets.registry().admitted(), [arg for arg in argv[1:-1]]))
+            report = {"outcome": "COMPLETED", "candidate": {"files": []}}
+            return 0, json.dumps({"kind": nisi.RUNNER_KIND, "report": report}).encode(), "exited"
+
+        with self.flagless_node(), mock.patch.object(nisi, "_bounded_run", fake_bounded_run):
+            result = nisi.run({**ARGS, "ticket": ticket("T-1")}, load_config())
+        self.assertEqual(result["sandbox"], "none")
+        self.assertEqual(seen, [(["T-1"], [])])
+        self.assertEqual(tickets.registry().admitted(), [])
 
     def test_tool_schema_accepts_ticket(self):
         schema = next(tool for tool in tools.TOOLS if tool["name"] == "agiw_nisi_run")["inputSchema"]

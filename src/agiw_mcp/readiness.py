@@ -12,6 +12,7 @@ import sys
 
 from . import consent, keys, nisi
 from .config import Config, ConfigError, config_file_path, display_path, load_config
+from .errors import ToolError
 from .net import HttpFailure, NetworkRefused, request_json
 
 PROBE_TIMEOUT = 3.0
@@ -41,7 +42,10 @@ def check_config() -> tuple[dict, Config | None]:
     return _check("config", True, f"Configuration from {config.source}"), config
 
 
-def check_node() -> dict:
+def check_node(config: Config | None = None) -> dict:
+    """Node 22 or newer, with a permission model unless config allow_unsandboxed_nisi is true.
+
+    Without a valid configuration the default (not allowed) applies."""
     path, version = nisi.find_node()
     if not path:
         return _check("node", False, "node was not found on PATH",
@@ -54,7 +58,25 @@ def check_node() -> dict:
     if version < nisi.MIN_NODE:
         return _check("node", False, f"Node {text} at {display_path(path)} is older than 22",
                       "Upgrade Node.js to 22 or newer.")
-    return _check("node", True, f"Node {text} at {display_path(path)}")
+    try:
+        sandbox = nisi.sandbox_label(path)
+    except ToolError:
+        return _check("node", False, f"Node {text} at {display_path(path)}: its permission model could not be "
+                      "checked (node --help failed)",
+                      "Check that `node --help` works in a terminal, then run agiw_readiness again.")
+    if sandbox == "none":
+        if config is None or not config.allow_unsandboxed_nisi:
+            try:
+                where = display_path(config_file_path())
+            except ConfigError:
+                where = "config.json"
+            return _check("node", False, f"Node {text} at {display_path(path)} lists no permission-model flag, "
+                          "so agiw_nisi_run refuses to start it (NODE_SANDBOX_UNAVAILABLE)",
+                          "Use a Node.js 22 or newer whose `node --help` lists --permission, or set "
+                          f'"allow_unsandboxed_nisi": true in {where} to run Nisi without a file-access limit.')
+        return _check("node", True, f"Node {text} at {display_path(path)} (sandbox: none, allowed by "
+                      "allow_unsandboxed_nisi; Nisi runs have no file-access limit)")
+    return _check("node", True, f"Node {text} at {display_path(path)} (sandbox: {sandbox})")
 
 
 def check_nisi() -> dict:
@@ -181,7 +203,10 @@ def evaluate(stop_at_first: bool = True) -> dict:
                           "Grant consent first (`agiw-mcp consent grant`), then run agiw_readiness again.")
         return check_key(holder.get("config") or Config())
 
-    steps = [("python", check_python), ("config", config_step), ("node", check_node), ("nisi", check_nisi),
+    def node_step() -> dict:
+        return check_node(holder.get("config"))
+
+    steps = [("python", check_python), ("config", config_step), ("node", node_step), ("nisi", check_nisi),
              ("models", models_step)]
     for name, step in steps:
         try:

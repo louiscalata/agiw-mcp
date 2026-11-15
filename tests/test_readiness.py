@@ -20,6 +20,9 @@ class ReadinessTests(IsolatedTestCase):
         patcher = mock.patch.object(nisi, "find_node", return_value=GOOD_NODE)
         self.find_node = patcher.start()
         self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(nisi, "permission_base", return_value=["--permission"])
+        self.permission_base = patcher.start()
+        self.addCleanup(patcher.stop)
         self.models = FakeModelServer()
         self.addCleanup(self.models.close)
 
@@ -92,6 +95,85 @@ class ReadinessTests(IsolatedTestCase):
         self.make_ready()
         self.find_node.return_value = ("/usr/bin/node", (20, 11, 1))
         self.assertEqual(self.missing(), "node")
+
+    def test_node_without_permission_model_fails_the_node_check(self):
+        self.make_ready()
+        self.permission_base.return_value = None
+        result = readiness.evaluate()
+        self.assertEqual(result["status"], "NOT_READY")
+        self.assertEqual(result["missing"]["id"], "node")
+        self.assertIn("permission", result["missing"]["detail"])
+        self.assertIn("allow_unsandboxed_nisi", result["missing"]["fix"])
+        self.assertIn("--permission", result["missing"]["fix"])
+        self.assertEqual([row["id"] for row in result["checks"]], ["python", "config", "node"])
+        status, error = tools.call_tool("agiw_status", {})
+        self.assertFalse(error)
+        self.assertEqual(status["node"]["sandbox"], "none")
+        self.assertFalse(status["prerequisites"]["node"])
+        self.assertIs(status["config"]["allow_unsandboxed_nisi"], False)
+
+    def test_node_without_permission_model_is_ready_when_config_allows_it(self):
+        self.make_ready()
+        self.write_config(model_base_url=self.models.base + "/v1", author_model="author-model",
+                          reviewer_model="reviewer-model", allow_unsandboxed_nisi=True)
+        self.permission_base.return_value = None
+        result = readiness.evaluate()
+        self.assertEqual(result["status"], "READY", result)
+        node = [row for row in result["checks"] if row["id"] == "node"][0]
+        self.assertIn("allow_unsandboxed_nisi", node["detail"])
+        status, error = tools.call_tool("agiw_status", {})
+        self.assertFalse(error)
+        self.assertEqual(status["node"]["sandbox"], "none")
+        self.assertTrue(status["prerequisites"]["node"])
+        self.assertIs(status["config"]["allow_unsandboxed_nisi"], True)
+
+    def test_node_sandbox_label_in_status_and_readiness(self):
+        self.make_ready()
+        status, error = tools.call_tool("agiw_status", {})
+        self.assertFalse(error)
+        self.assertEqual(status["node"]["sandbox"], "node-permission")
+        node = [row for row in readiness.evaluate()["checks"] if row["id"] == "node"][0]
+        self.assertTrue(node["ok"])
+        self.assertIn("node-permission", node["detail"])
+
+    def test_failed_permission_probe_fails_the_node_check(self):
+        self.make_ready()
+        self.permission_base.side_effect = nisi.ToolError("NODE_UNAVAILABLE", "probe failed")
+        result = readiness.evaluate()
+        self.assertEqual(result["missing"]["id"], "node")
+        self.assertIn("node --help", result["missing"]["fix"])
+        status, error = tools.call_tool("agiw_status", {})
+        self.assertFalse(error)
+        self.assertIsNone(status["node"]["sandbox"])
+        self.assertFalse(status["prerequisites"]["node"])
+
+    def test_missing_or_old_node_is_not_probed_and_reports_no_sandbox(self):
+        self.make_ready()
+        for found in ((None, None), ("/usr/bin/node", None), ("/usr/bin/node", (20, 11, 1))):
+            self.find_node.return_value = found
+            self.assertEqual(self.missing(), "node")
+            status, error = tools.call_tool("agiw_status", {})
+            self.assertFalse(error)
+            self.assertIsNone(status["node"]["sandbox"], found)
+        self.permission_base.assert_not_called()
+
+    def test_node_without_permission_model_fails_without_a_valid_config(self):
+        # No usable configuration means the default applies: an unsandboxed Node is not allowed.
+        self.permission_base.return_value = None
+        for row in (readiness.check_node(), readiness.check_node(None)):
+            self.assertFalse(row["ok"], row)
+            self.assertIn("allow_unsandboxed_nisi", row["fix"])
+        # A config that tries to set the key with a non-boolean is invalid, so it does not opt out.
+        self.write_config(model_base_url=self.models.base + "/v1", author_model="author-model",
+                          reviewer_model="reviewer-model", allow_unsandboxed_nisi="yes")
+        status, error = tools.call_tool("agiw_status", {})
+        self.assertFalse(error)
+        self.assertFalse(status["prerequisites"]["config"])
+        self.assertEqual(status["node"]["sandbox"], "none")
+        self.assertFalse(status["prerequisites"]["node"])
+        result = readiness.evaluate(stop_at_first=False)
+        node = [row for row in result["checks"] if row["id"] == "node"][0]
+        self.assertFalse(node["ok"], node)
 
     def test_consent_missing(self):
         self.configure()
@@ -177,6 +259,7 @@ class StatusAndModelTests(IsolatedTestCase):
     def setUp(self):
         super().setUp()
         for patcher in (mock.patch.object(nisi, "find_node", return_value=GOOD_NODE),
+                        mock.patch.object(nisi, "permission_base", return_value=["--permission"]),
                         mock.patch.object(readiness, "request_json", return_value=(200, {"data": [
                             {"id": "author-model"}, {"id": "reviewer-model"}]}))):
             patched = patcher.start()

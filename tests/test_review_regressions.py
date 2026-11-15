@@ -269,12 +269,13 @@ class LifecycleRegressions(IsolatedTestCase):
         import time
         from support import subprocess_env
         child = "import os, pathlib, time; pathlib.Path('child-pid').write_text(str(os.getpid())); time.sleep(60)"
-        self.write_config(author_model="author", reviewer_model="reviewer")
+        self.write_config(author_model="author", reviewer_model="reviewer", allow_unsandboxed_nisi=True)
         script = '''
 import sys
 from pathlib import Path
 from agiw_mcp import __main__, nisi
 nisi.find_node = lambda: (sys.executable, (22, 0, 0))
+nisi.permission_base = lambda node: None
 nisi.permission_flags = lambda *args: ([], 'none')
 nisi._copy_verified = lambda source, work: (work / 'runner.mjs').write_text(CHILD)
 nisi.tempfile.tempdir = PARENT
