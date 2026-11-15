@@ -206,6 +206,9 @@ time, tool, SHA-256 and byte count of your text, the JSON request body's SHA-256
 was truncated, the outcome code, HTTP status, number of flags and elapsed
 milliseconds (`elapsedMs`). It never contains the text or the key. New logs are
 created with mode 0600 on macOS and Linux; an existing log keeps its mode.
+The log is rotated when it exceeds 1 MiB: the next write renames it to
+`jev-activity.jsonl.1` (keeping its mode), replacing any earlier `.1`, and starts a
+new log, so only the current and one previous file are kept.
 Nisi runs have no per-call log; ticket admission state is
 stored separately. Each scope lock record also holds, in plain text, the canonical scope, the
 ticket id and the ticket owner text, inside the mode 0700 ticket state directory; refusals do not
