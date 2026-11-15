@@ -6,6 +6,11 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ## [Unreleased]
 
+### Changed
+
+- **Behavior change.** `agiw_nisi_run` refuses with `NODE_SANDBOX_UNAVAILABLE` when `node --help` lists neither `--permission` nor `--experimental-permission`. Previously the run proceeded without a file-access limit and reported sandbox `"none"`. Use a Node.js that lists the flag, or set `"allow_unsandboxed_nisi": true` in `config.json`. The key is read only from `config.json`. A build from before this change refuses a `config.json` that contains it. (#48)
+- `agiw_status` reports `node.sandbox`. `agiw_readiness` fails the node check when Node has no permission model and `allow_unsandboxed_nisi` is false, or when `node --help` fails. (#48)
+
 ### Fixed
 
 - Nisi runs work with an IPv6 loopback endpoint (`http://[::1]:<port>/...`). The host transport previously refused the bracketed hostname that Node returns. (#42)
@@ -13,6 +18,7 @@ until a release is assigned. Entries under Unreleased are not a new release.
 - Configured base URLs with an empty trailing `?` or `#` are rejected as invalid configuration. (#42)
 - The host runner checks the raw author and reviewer endpoint text before parsing it and refuses spellings that configuration rejects, such as `127.1`, `0x7f.1` or userinfo, with `LOCAL_CHAT_DESTINATION_REFUSED`. (#42)
 - The host runner refuses author and reviewer endpoint ports outside 1-65535 with `LOCAL_CHAT_DESTINATION_REFUSED`, matching configuration. (#43)
+- Ticket admission refuses a scope lock that is not a regular file, is larger than 16 KiB, or is nested too deeply to parse (`TICKET_REGISTRY_CORRUPT`), instead of blocking or failing with an internal error. (#46)
 
 ### Documentation
 
@@ -23,12 +29,14 @@ until a release is assigned. Entries under Unreleased are not a new release.
 - Use US spellings in the README, contributing notes, and provenance (`license`, `behavior`). The Claude Desktop section distinguishes the current guide's macOS, Windows and Linux paths from the 2025-11-25 snapshot, which lists only macOS and Windows.
 - Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
 - The README lists the legacy `initialize` versions the server accepts: `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
+- `docs/design/v0.2.md` proposes the next scope of work as lanes L1 to L6, with owner decisions D1 to D5. (#47)
 
 ### Tests
 
 - The git-install CI job lists tools with MCP Inspector 2.14.0. It does not call Jev or a model.
 - Windows CI runs the scrub check, compile, and unit tests on Python 3.12 and Node 22. Ticket-admission tests are skipped there because admission is refused before the ticket directory is touched.
 - The trickling-server deadline test waits up to a bounded time for the client's close (EOF or reset) instead of a fixed one-second join, which failed once on a busy Windows runner. Test-only; `net.py` is unchanged. (#44)
+- A test pins the SHA-256 of the consent disclosure, so an edit that would invalidate stored grants fails a test first. (#48)
 
 ### Packaging
 
