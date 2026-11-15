@@ -111,6 +111,27 @@ implemented here. The table does not cover every practice in that guide.
   the ticket directory stays, as after any admitted run. A second check on the final
   command line refuses a runner without permission flags unless the key is
   true.
+- The optional `check_python` setting selects the interpreter used for Python
+  syntax checks. The path is validated as an absolute config string, then
+  probed after ticket admission and before temporary-directory creation with
+  fixed `-I -S -B` flags, a fixed version script, a minimal environment and a
+  3 second limit. The probe accepts only a strict `X.Y.Z` version and adds no
+  minimum-version gate. No minimum Python version is enforced for the
+  selected interpreter; the checker is tested on Python 3.12 and newer. A failed
+  probe returns `CHECK_PYTHON_UNAVAILABLE` with a fixed path-free message;
+  ticket locks are released. `check_python` is config-only, not an environment
+  override or tool argument. Its version is included in `pythonCheckerVersion`
+  and the input fingerprint; its path is excluded from the fingerprint and
+  from refusal text. `agiw_status` displays the path with `display_path` and
+  reports the probed version. Readiness adds `syntax_python` after the Nisi
+  check only when configured.
+- The Python checker runs outside Node's permission model, just as the
+  syntax-check child did before this option. The selected binary and the
+  server's launch environment are trusted inputs: a same-user config writer
+  or whoever controls the launch environment can select a different config
+  and interpreter. The isolated flags, fixed probe, minimal environment and
+  timeout limit probe behavior; they do not make a compromised interpreter
+  safe.
 - `allow_unsandboxed_nisi` is read only from `config.json`. No environment
   variable sets it and it is not a tool argument, so an MCP tool caller cannot
   set it. It sits behind the same boundary as the consent record, which has two

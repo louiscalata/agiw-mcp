@@ -58,7 +58,8 @@ TOOLS = [
         "description": (
             'The "initiate online code mode" check. Only checks, never starts work. Returns READY, or '
             "the FIRST missing prerequisite with an exact fix, in this order: Python, configuration, "
-            "Node.js 22+, vendored Nisi hashes, local OpenAI-compatible model server listing two "
+            "Node.js 22+, vendored Nisi hashes, optional configured syntax Python, "
+            "local OpenAI-compatible model server listing two "
             "distinct configured models. Optional Jev readiness is reported separately; key presence "
             "is checked "
             "only after consent (Linux lookup returns the key but discards its output)."
@@ -223,13 +224,22 @@ def readiness_tool(args: dict) -> dict:
 def status_tool(args: dict) -> dict:
     _no_args(args)
     try:
-        config_info = load_config().public()
+        config = load_config()
+        config_info = config.public()
         config_error = None
         config_directory = display_path(config_dir())
         config_path = display_path(config_file_path())
     except ConfigError as exc:
+        config = None
         config_info, config_error = None, exc.message
         config_directory = config_path = None
+    check_python = None
+    if config is not None and config.check_python is not None:
+        check_python = {"path": display_path(config.check_python), "version": None}
+        try:
+            check_python["version"] = nisi.probe_check_python(config.check_python)
+        except ToolError:
+            pass  # Status reports an unavailable checker with a null version; readiness supplies the fix.
     node_path, node_version = nisi.find_node()
     node_sandbox = None  # null when Node is missing, too old to run Nisi, or the probe failed
     if node_path and node_version and node_version >= nisi.MIN_NODE:
@@ -246,6 +256,7 @@ def status_tool(args: dict) -> dict:
     return {
         "server": {"name": SERVER_NAME, "version": __version__},
         "python": {"version": platform.python_version(), "executable": display_path(sys.executable)},
+        "checkPython": check_python,
         "platform": sys.platform,
         "node": {
             "path": display_path(node_path) if node_path else None,

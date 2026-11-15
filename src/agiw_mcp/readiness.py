@@ -51,6 +51,23 @@ def check_config() -> tuple[dict, Config | None]:
     return _check("config", True, f"Configuration from {config.source}"), config
 
 
+def check_syntax_python(config: Config | None) -> dict | None:
+    """Check the optional configured Python interpreter used for candidate syntax checks."""
+    if config is None or config.check_python is None:
+        return None
+    try:
+        version = nisi.probe_check_python(config.check_python)
+    except ToolError as exc:
+        return _check(
+            "syntax_python",
+            False,
+            exc.message,
+            "Set check_python in config.json to a working Python interpreter, or remove the key "
+            "to use the server's interpreter.",
+        )
+    return _check("syntax_python", True, f"Python {version} for candidate syntax checks")
+
+
 def check_node(config: Config | None = None) -> dict:
     """Node 22 or newer, with a permission model unless config allow_unsandboxed_nisi is true.
 
@@ -263,6 +280,14 @@ def check_consent() -> dict:
     )
 
 
+def _configured_models(config: Config | None) -> dict:
+    if config is None:
+        return _check(
+            "models", False, "Not checked because the configuration is invalid", "Fix the configuration first."
+        )
+    return check_models(config)
+
+
 def evaluate(stop_at_first: bool = True) -> dict:
     checks: list[dict] = []
     holder: dict = {}
@@ -272,11 +297,7 @@ def evaluate(stop_at_first: bool = True) -> dict:
         return row
 
     def models_step() -> dict:
-        if holder.get("config") is None:
-            return _check(
-                "models", False, "Not checked because the configuration is invalid", "Fix the configuration first."
-            )
-        return check_models(holder["config"])
+        return _configured_models(holder.get("config"))
 
     def key_step() -> dict:
         # Looking for the key comes after consent: on Linux the Secret Service lookup returns the secret.
@@ -292,11 +313,15 @@ def evaluate(stop_at_first: bool = True) -> dict:
     def node_step() -> dict:
         return check_node(holder.get("config"))
 
+    def syntax_python_step() -> dict | None:
+        return check_syntax_python(holder.get("config"))
+
     steps = [
         ("python", check_python),
         ("config", config_step),
         ("node", node_step),
         ("nisi", check_nisi),
+        ("syntax_python", syntax_python_step),
         ("models", models_step),
     ]
     for name, step in steps:
@@ -304,11 +329,13 @@ def evaluate(stop_at_first: bool = True) -> dict:
             row = step()
         except Exception:  # noqa: BLE001 - readiness never raises
             row = _check(name, False, "The check failed unexpectedly", "Run agiw_status for details.")
+        if row is None:
+            continue
         checks.append(row)
         if not row["ok"] and stop_at_first:
             break
     failed = [row for row in checks if not row["ok"]]
-    ready = not failed and len(checks) == len(steps)
+    ready = not failed
     result = {"status": "READY" if ready else "NOT_READY", "checks": checks}
     jev_checks = []
     if ready or not stop_at_first:

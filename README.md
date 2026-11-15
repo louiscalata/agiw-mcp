@@ -6,7 +6,7 @@
 
 AGIW MCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server: a readiness check for this machine, optional consent-gated questions to TypeSafe's Jev model, and one Nisi run on file contents you supply.
 
-**Status:** the `v0.1.0` tag and current main both report version `0.1.0`. Python 3.10 or newer. Node.js 22 or newer when a Nisi run needs it. CI runs on macOS, Linux, and Windows. Apache-2.0. Not published to PyPI.
+**Status:** the `v0.1.0` tag and current main both report version `0.1.0`. The server needs Python 3.10 or newer. The optional syntax-check interpreter is configured separately. Node.js 22 or newer when a Nisi run needs it. CI runs on macOS, Linux, and Windows. Apache-2.0. Not published to PyPI.
 
 ## Quick start
 
@@ -47,9 +47,9 @@ Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are i
 
 ## How it works
 
-Say "initiate online code mode" with no task. The assistant should call `agiw_readiness` and report `READY`, or the first missing local prerequisite and its fix. That call starts no model, server or Nisi run; it does run `node --version` and `node --help`.
+Say "initiate online code mode" with no task. The assistant should call `agiw_readiness` and report `READY`, or the first missing local prerequisite and its fix. That call starts no model, server or Nisi run; it does run `node --version` and `node --help` and, when `check_python` is set, the configured interpreter once to read its version (`<check_python> -I -S -B -c <fixed version script>`).
 
-1. **Readiness** checks, in order: Python 3.10 or newer, configuration, Node.js 22 or newer on `PATH` whose `node --help` lists a permission flag (or `allow_unsandboxed_nisi` set to `true`), the vendored Nisi v0.2.0 hashes, then the configured local OpenAI-compatible model servers. Configure two different model IDs. By default, both must appear in `GET <model_base_url>/models`. If `reviewer_base_url` is set, the author must appear in the author server's list and the reviewer in the reviewer server's list. Configuration, readiness and Nisi runs accept IPv4 and IPv6 loopback URLs (`http://127.0.0.1:<port>/...` or `http://[::1]:<port>/...`). The check stops at the first failure. Hostnames, HTTPS, other addresses, credentials, queries and fragments are refused, including an empty trailing `?` or `#`.
+1. **Readiness** checks, in order: Python 3.10 or newer, configuration, Node.js 22 or newer on `PATH` whose `node --help` lists a permission flag (or `allow_unsandboxed_nisi` set to `true`), the vendored Nisi v0.2.0 hashes, an optional configured syntax-check interpreter, then the configured local OpenAI-compatible model servers. Configure two different model IDs. By default, both must appear in `GET <model_base_url>/models`. If `reviewer_base_url` is set, the author must appear in the author server's list and the reviewer in the reviewer server's list. Configuration, readiness and Nisi runs accept IPv4 and IPv6 loopback URLs (`http://127.0.0.1:<port>/...` or `http://[::1]:<port>/...`). The check stops at the first failure. Hostnames, HTTPS, other addresses, credentials, queries and fragments are refused, including an empty trailing `?` or `#`.
 2. **Nisi** (`agiw_nisi_run`) runs one Nisi v0.2.0 workflow on the file contents in the request. A local author model drafts, static checks and your assertions run, a different local reviewer model reviews, and a short repair loop follows (`repair_budget` 0 to 3, default 1). You get proposed file contents and a report. The server never reads or writes your project and never runs the generated code. `COMPLETED` means those checks passed. It is not a verdict that the proposal is right.
 3. **Jev** is optional and is not required for a Nisi run. `agiw_jev_pre` sends a task (at most 12 KiB) and `agiw_jev_post` sends a report (truncated to 12 KiB) to `https://api.typesafe.ai/v1/systemone`. The default model is `jev-1.14.0`. Both refuse until consent is recorded and a TypeSafe API key is available. The MCP tool can show or revoke consent. It cannot grant it. `agiw-mcp consent grant` asks in an interactive terminal. The answers are advisory.
 
@@ -62,6 +62,7 @@ One server process handles one tool call at a time. During a Nisi run, ping and 
 **Works**
 
 - The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
+- An optional `check_python` interpreter for Nisi's Python syntax check.
 - Vendored Nisi v0.2.0, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text.
 
@@ -120,7 +121,9 @@ When configured, `reasoning_effort` (`none`, `low`, `medium` or `high`) is sent 
 }
 ```
 
-Other keys: `reviewer_base_url` (optional, same loopback rule; otherwise the reviewer uses `model_base_url`), `keychain_service` (default `agiw-mcp`), `keychain_account` (default `typesafe`), `jev_model` (default `jev-1.14.0`), `max_output_tokens` (default 4096), `reasoning_effort` (unset), `require_ticket` (default false) and `allow_unsandboxed_nisi` (default false). `require_ticket: true` makes `agiw_nisi_run` refuse a request that has no claim ticket.
+Other keys: `reviewer_base_url` (optional, same loopback rule; otherwise the reviewer uses `model_base_url`), `keychain_service` (default `agiw-mcp`), `keychain_account` (default `typesafe`), `jev_model` (default `jev-1.14.0`), `max_output_tokens` (default 4096), `reasoning_effort` (unset), `require_ticket` (default false), `allow_unsandboxed_nisi` (default false) and `check_python` (unset). `require_ticket: true` makes `agiw_nisi_run` refuse a request that has no claim ticket.
+
+`check_python` is an optional absolute path to the Python interpreter used only for Nisi's Python syntax check. It must be a string of 1 to 1024 characters with no C0, DEL, or C1 control characters. Omit it to keep using the Python interpreter that runs agiw-mcp. `null` is invalid. The interpreter is probed for a strict `X.Y.Z` version after ticket admission and before temporary-directory creation, using fixed `-I -S -B` flags and a 3 second limit. The probe imposes no minimum Python version. A failed probe returns `CHECK_PYTHON_UNAVAILABLE` with a fixed message that does not include the path; a ticketed request releases its ticket. `agiw_status` includes `checkPython` with `path` in display form and `version`. When configured, readiness adds `syntax_python` after the Nisi check. The selected version is included in `pythonCheckerVersion` and the input fingerprint; the interpreter path is not part of the fingerprint. The path is not an environment override or a tool argument. Older builds reject this key as `CONFIG_INVALID`; remove it before downgrading.
 
 `allow_unsandboxed_nisi: true` lets `agiw_nisi_run` start on a Node whose `node --help` lists neither `--permission` nor `--experimental-permission`. Such a run has no file-access limit and reports `sandbox: "none"`. With the default, it is refused with `NODE_SANDBOX_UNAVAILABLE`. The key is read only from `config.json`: no environment variable sets it, and it is not a tool argument. The environment still chooses which `config.json` is read, through `AGIW_MCP_CONFIG_DIR` or the per-OS variables in the table above, so whoever sets the server's launch environment (for example the `env` block of an MCP client file) can select a file that sets it. A build from before this key existed refuses a `config.json` that contains it (`CONFIG_INVALID`); remove the key before going back to such a build.
 
@@ -275,7 +278,7 @@ This repository's tests do not start Claude Desktop, Cursor, Claude Code, Factor
 
 Paths are relative, at most 256 characters, with parts of at most 128. A part starts with a letter, digit or `_@+-`, optionally after one dot, and may then contain letters, digits or `._@+-`. Empty, `.` and `..` parts, trailing-dot parts, and Windows device names are refused.
 
-`files` and `new_files` each allow 64 entries. Supplied contents are limited to 256 KiB per file and 512 KiB in total, as UTF-8. Proposed contents have a separate 2 MiB total. Static checks compile Python with `compile` (no execution), parse JavaScript with `node --check`, and parse JSON. Other extensions report `NOT_SUPPORTED` and do not fail that stage. Python syntax uses the interpreter running agiw-mcp.
+`files` and `new_files` each allow 64 entries. Supplied contents are limited to 256 KiB per file and 512 KiB in total, as UTF-8. Proposed contents have a separate 2 MiB total. Static checks compile Python with `compile` (no execution), parse JavaScript with `node --check`, and parse JSON. Other extensions report `NOT_SUPPORTED` and do not fail that stage. Python syntax uses `check_python` when configured, otherwise the interpreter running agiw-mcp.
 
 The host HTTP transport limits each model response body to 8 MiB while receiving it. If the next chunk would exceed that limit, it aborts the request and refuses the response with `LOCAL_CHAT_RESPONSE_TOO_LARGE`.
 
@@ -285,7 +288,7 @@ The runner is started with Node's permission model, with file reads and writes l
 
 During a Nisi run, ping and cancellation are handled while up to 16 other messages wait. Cancelling the active request or closing stdin stops the runner and suppresses its reply. SIGTERM and SIGHUP also clean up.
 
-`taskFingerprint` is Nisi's task-record hash and excludes the supplied text. `inputFingerprint` binds the host request's task, file contents, assertions, model and check options, and the Python version. `requestSha256` hashes the body passed to fetch. A null transport hash means fetch was not called.
+`taskFingerprint` is Nisi's task-record hash and excludes the supplied text. `inputFingerprint` binds the host request's task, file contents, assertions, model and check options, and the Python checker version, but not the configured interpreter path. `requestSha256` hashes the body passed to fetch. A null transport hash means fetch was not called.
 
 ### Uninstall
 
