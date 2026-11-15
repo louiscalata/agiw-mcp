@@ -58,7 +58,8 @@ TOOLS = [
         "description": (
             'The "initiate online code mode" check. Only checks, never starts work. Returns READY, or '
             "the FIRST missing prerequisite with an exact fix, in this order: Python, configuration, "
-            "Node.js 22+, vendored Nisi hashes, local OpenAI-compatible model server listing two "
+            "Node.js 22+ whose node --help lists a permission flag (or allow_unsandboxed_nisi is true "
+            "in config.json), vendored Nisi hashes, local OpenAI-compatible model server listing two "
             "distinct configured models. Optional Jev readiness is reported separately; key presence "
             "is checked "
             "only after consent (Linux lookup returns the key but discards its output)."
