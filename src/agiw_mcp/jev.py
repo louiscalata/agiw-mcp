@@ -5,6 +5,7 @@
 Order of checks: input bounds, consent, key, then exactly one HTTPS request.
 There is no automatic retry. Errors carry fixed messages only.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -36,8 +37,11 @@ def _usage(value) -> dict | None:
     """Only small non-negative integer counters, so a response cannot echo text or a key back out."""
     if not isinstance(value, dict):
         return None
-    kept = {key: count for key, count in value.items()
-            if isinstance(key, str) and USAGE_KEY.match(key) and type(count) is int and 0 <= count < 10**9}
+    kept = {
+        key: count
+        for key, count in value.items()
+        if isinstance(key, str) and USAGE_KEY.match(key) and type(count) is int and 0 <= count < 10**9
+    }
     return dict(sorted(kept.items())[:8]) or None
 
 
@@ -52,9 +56,11 @@ def _prepare(phase: str, text) -> tuple[str, int, bool]:
         raise ToolError("INPUT_INVALID", "The text must be valid Unicode.") from None
     if phase == "pre":
         if len(raw) > consent.MAX_PRE_BYTES:
-            raise ToolError("INPUT_TOO_LARGE",
-                            f"The task text is {len(raw)} bytes; the limit is {consent.MAX_PRE_BYTES}. "
-                            "Summarize the task and try again.")
+            raise ToolError(
+                "INPUT_TOO_LARGE",
+                f"The task text is {len(raw)} bytes; the limit is {consent.MAX_PRE_BYTES}. "
+                "Summarize the task and try again.",
+            )
         return text, len(raw), False
     if len(raw) <= consent.MAX_POST_BYTES:
         return text, len(raw), False
@@ -85,10 +91,12 @@ def analyse(phase: str, text, config: Config) -> dict:
     sent_text, input_bytes, truncated = _prepare(phase, text)
     input_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
     if not consent.consent_recorded():
-        raise ToolError("CONSENT_REQUIRED",
-                        "Consent to send text to TypeSafe is not recorded. Call agiw_consent with action \"show\" so "
-                        "the user can read the disclosure; if they agree, they run `agiw-mcp consent grant` "
-                        "in a terminal.")
+        raise ToolError(
+            "CONSENT_REQUIRED",
+            'Consent to send text to TypeSafe is not recorded. Call agiw_consent with action "show" so '
+            "the user can read the disclosure; if they agree, they run `agiw-mcp consent grant` "
+            "in a terminal.",
+        )
     try:
         key = keys.read_key(config)
     except keys.KeyUnavailable:
@@ -100,28 +108,51 @@ def analyse(phase: str, text, config: Config) -> dict:
     started = time.monotonic()
 
     def log(outcome: str, status=None, flagged=None):
-        activity.record(tool=tool, inputSha256=input_sha, requestSha256=request_sha, inputBytes=input_bytes,
-                        sentBytes=sent_bytes, truncated=truncated, outcome=outcome, httpStatus=status,
-                        flaggedCount=flagged, elapsedMs=int((time.monotonic() - started) * 1000))
+        activity.record(
+            tool=tool,
+            inputSha256=input_sha,
+            requestSha256=request_sha,
+            inputBytes=input_bytes,
+            sentBytes=sent_bytes,
+            truncated=truncated,
+            outcome=outcome,
+            httpStatus=status,
+            flaggedCount=flagged,
+            elapsedMs=int((time.monotonic() - started) * 1000),
+        )
 
     try:
-        status, response = request_json(endpoint(), method="POST", body=body,
-                                        headers={"Authorization": "Bearer " + key},
-                                        timeout=TIMEOUT, max_bytes=MAX_RESPONSE_BYTES)
+        status, response = request_json(
+            endpoint(),
+            method="POST",
+            body=body,
+            headers={"Authorization": "Bearer " + key},
+            timeout=TIMEOUT,
+            max_bytes=MAX_RESPONSE_BYTES,
+        )
     except NetworkRefused:
         log("ENDPOINT_REFUSED")
         raise ToolError("JEV_ENDPOINT_REFUSED", "The Jev endpoint was refused by policy; nothing was sent.") from None
     except HttpFailure as failure:
         if failure.kind == "busy":
             log("BUSY")
-            raise ToolError("JEV_BUSY", "Local HTTP workers are busy; nothing was sent. "
-                            "Wait for an in-flight request to finish before trying again. Not retried.") from None
+            raise ToolError(
+                "JEV_BUSY",
+                "Local HTTP workers are busy; nothing was sent. "
+                "Wait for an in-flight request to finish before trying again. Not retried.",
+            ) from None
         if failure.kind == "http":
             log("HTTP_ERROR", failure.status)
-            hint = {401: " The API key was rejected.", 403: " The API key is not allowed to use this model.",
-                    429: " TypeSafe is rate limiting; wait before trying again."}.get(failure.status, "")
-            raise ToolError("JEV_HTTP_ERROR", f"TypeSafe returned HTTP {failure.status}.{hint} Not retried.",
-                            httpStatus=failure.status) from None
+            hint = {
+                401: " The API key was rejected.",
+                403: " The API key is not allowed to use this model.",
+                429: " TypeSafe is rate limiting; wait before trying again.",
+            }.get(failure.status, "")
+            raise ToolError(
+                "JEV_HTTP_ERROR",
+                f"TypeSafe returned HTTP {failure.status}.{hint} Not retried.",
+                httpStatus=failure.status,
+            ) from None
         if failure.kind == "redirect":
             log("REDIRECT_REFUSED", failure.status)
             raise ToolError("JEV_REDIRECT_REFUSED", "TypeSafe answered with a redirect; it was not followed.") from None
@@ -129,28 +160,40 @@ def analyse(phase: str, text, config: Config) -> dict:
             log("BAD_RESPONSE", failure.status)
             raise ToolError("JEV_BAD_RESPONSE", "TypeSafe's response was not a valid Jev answer.") from None
         log("UNREACHABLE")
-        raise ToolError("JEV_UNREACHABLE", "The TypeSafe exchange failed or timed out. The request may have been sent. "
-                        "Not retried.") from None
+        raise ToolError(
+            "JEV_UNREACHABLE", "The TypeSafe exchange failed or timed out. The request may have been sent. Not retried."
+        ) from None
     finally:
-        key = None  # noqa: F841 - drop the reference as early as possible
+        key = None  # drop the reference as early as possible
 
     answers = response.get("answers") if isinstance(response, dict) else None
-    if (not isinstance(answers, dict) or set(answers) != set(questions)
-            or not all(_answer_valid(questions[qid], answers[qid]) for qid in questions)):
+    if (
+        not isinstance(answers, dict)
+        or set(answers) != set(questions)
+        or not all(_answer_valid(questions[qid], answers[qid]) for qid in questions)
+    ):
         log("BAD_RESPONSE", status)
         raise ToolError("JEV_BAD_RESPONSE", "TypeSafe's response did not answer the fixed questions.")
     served = response.get("model")
     if config.jev_model != "jev-latest" and served != config.jev_model:
         log("MODEL_MISMATCH", status)
-        raise ToolError("JEV_MODEL_MISMATCH", "TypeSafe served a different Jev model than the one configured.",
-                        requestedModel=config.jev_model)
+        raise ToolError(
+            "JEV_MODEL_MISMATCH",
+            "TypeSafe served a different Jev model than the one configured.",
+            requestedModel=config.jev_model,
+        )
     rows = []
     for qid, question in questions.items():
         answer = answers[qid]
         value = answer.get("noul") if question["type"] == "noul" else answer.get("score")
-        row = {"id": qid, "type": question["type"], "question": question["instructions"],
-               "criteria": question["criteria"], "answer": round(float(value), 4),
-               "flagged": is_flagged(question, answer)}
+        row = {
+            "id": qid,
+            "type": question["type"],
+            "question": question["instructions"],
+            "criteria": question["criteria"],
+            "answer": round(float(value), 4),
+            "flagged": is_flagged(question, answer),
+        }
         if question["type"] == "score":
             row["scaleMax"] = len(question["criteria"]) - 1
         if _finite(answer.get("confidence")):
@@ -169,6 +212,9 @@ def analyse(phase: str, text, config: Config) -> dict:
         "flagRule": "noul >= 0.5, or score >= half of the scale maximum",
         "questions": rows,
         "usage": _usage(response.get("usage")),
-        "note": ("These are Jev's probabilities for fixed questions. They are " + ADVISORY +
-                 "; check the work itself before acting."),
+        "note": (
+            "These are Jev's probabilities for fixed questions. They are "
+            + ADVISORY
+            + "; check the work itself before acting."
+        ),
     }

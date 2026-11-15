@@ -45,15 +45,21 @@ class ReadinessTests(IsolatedTestCase):
         self.make_ready()
         result = readiness.evaluate()
         self.assertEqual(result["status"], "READY", result)
-        self.assertEqual([row["id"] for row in result["checks"]],
-                         ["python", "config", "node", "nisi", "models", "consent", "jev_key"])
+        self.assertEqual(
+            [row["id"] for row in result["checks"]],
+            ["python", "config", "node", "nisi", "models", "consent", "jev_key"],
+        )
 
     def test_separate_reviewer_server_is_probed_for_the_reviewer(self):
         reviewer_server = FakeModelServer(models=("reviewer-model",))
         self.addCleanup(reviewer_server.close)
         self.models.models = ["author-model"]
-        self.write_config(model_base_url=self.models.base + "/v1", reviewer_base_url=reviewer_server.base + "/v1",
-                          author_model="author-model", reviewer_model="reviewer-model")
+        self.write_config(
+            model_base_url=self.models.base + "/v1",
+            reviewer_base_url=reviewer_server.base + "/v1",
+            author_model="author-model",
+            reviewer_model="reviewer-model",
+        )
         row = readiness.check_models(readiness.load_config())
         self.assertTrue(row["ok"], row)
         self.assertIn(reviewer_server.base, row["detail"])
@@ -114,8 +120,12 @@ class ReadinessTests(IsolatedTestCase):
 
     def test_node_without_permission_model_is_ready_when_config_allows_it(self):
         self.make_ready()
-        self.write_config(model_base_url=self.models.base + "/v1", author_model="author-model",
-                          reviewer_model="reviewer-model", allow_unsandboxed_nisi=True)
+        self.write_config(
+            model_base_url=self.models.base + "/v1",
+            author_model="author-model",
+            reviewer_model="reviewer-model",
+            allow_unsandboxed_nisi=True,
+        )
         self.permission_base.return_value = None
         result = readiness.evaluate()
         self.assertEqual(result["status"], "READY", result)
@@ -164,8 +174,12 @@ class ReadinessTests(IsolatedTestCase):
             self.assertFalse(row["ok"], row)
             self.assertIn("allow_unsandboxed_nisi", row["fix"])
         # A config that tries to set the key with a non-boolean is invalid, so it does not opt out.
-        self.write_config(model_base_url=self.models.base + "/v1", author_model="author-model",
-                          reviewer_model="reviewer-model", allow_unsandboxed_nisi="yes")
+        self.write_config(
+            model_base_url=self.models.base + "/v1",
+            author_model="author-model",
+            reviewer_model="reviewer-model",
+            allow_unsandboxed_nisi="yes",
+        )
         status, error = tools.call_tool("agiw_status", {})
         self.assertFalse(error)
         self.assertFalse(status["prerequisites"]["config"])
@@ -258,10 +272,15 @@ class ReadinessTests(IsolatedTestCase):
 class StatusAndModelTests(IsolatedTestCase):
     def setUp(self):
         super().setUp()
-        for patcher in (mock.patch.object(nisi, "find_node", return_value=GOOD_NODE),
-                        mock.patch.object(nisi, "permission_base", return_value=["--permission"]),
-                        mock.patch.object(readiness, "request_json", return_value=(200, {"data": [
-                            {"id": "author-model"}, {"id": "reviewer-model"}]}))):
+        for patcher in (
+            mock.patch.object(nisi, "find_node", return_value=GOOD_NODE),
+            mock.patch.object(nisi, "permission_base", return_value=["--permission"]),
+            mock.patch.object(
+                readiness,
+                "request_json",
+                return_value=(200, {"data": [{"id": "author-model"}, {"id": "reviewer-model"}]}),
+            ),
+        ):
             patched = patcher.start()
             self.addCleanup(patcher.stop)
         self.models = patched
@@ -279,12 +298,15 @@ class StatusAndModelTests(IsolatedTestCase):
         self.assertIn("port", missing["detail"].lower())
         self.assertIn("model_base_url", missing["fix"])
         self.assertIn("AGIW_MCP_BASE_URL", missing["fix"])
-        self.models.assert_called_once_with("http://127.0.0.1:1235/v1/models",
-                                            timeout=readiness.PROBE_TIMEOUT, max_bytes=1024 * 1024)
+        self.models.assert_called_once_with(
+            "http://127.0.0.1:1235/v1/models", timeout=readiness.PROBE_TIMEOUT, max_bytes=1024 * 1024
+        )
 
     def test_only_one_missing_model_does_not_suggest_wrong_server(self):
-        for author, reviewer, missing_role in (("missing-author", "reviewer-model", "author_model"),
-                                                ("author-model", "missing-reviewer", "reviewer_model")):
+        for author, reviewer, missing_role in (
+            ("missing-author", "reviewer-model", "author_model"),
+            ("author-model", "missing-reviewer", "reviewer_model"),
+        ):
             with self.subTest(role=missing_role):
                 self.configure(author=author, reviewer=reviewer)
                 missing = readiness.evaluate()["missing"]
@@ -308,8 +330,9 @@ class StatusAndModelTests(IsolatedTestCase):
         with mock.patch.object(nisi, "VENDOR_DIR", copy):
             result, error = tools.call_tool("agiw_status", {})
         self.assertFalse(error)
-        self.assertEqual(result["nisi"], {"version": nisi.NISI_VERSION, "verified": False,
-                                         "code": "NISI_HASH_MISMATCH"})
+        self.assertEqual(
+            result["nisi"], {"version": nisi.NISI_VERSION, "verified": False, "code": "NISI_HASH_MISMATCH"}
+        )
         self.assertFalse(result["prerequisites"]["nisi"])
 
 

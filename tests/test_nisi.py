@@ -57,10 +57,17 @@ class NisiInputTests(IsolatedTestCase):
 class ProbeEnvTests(IsolatedTestCase):
     """Node 24 on Windows exits 134 (CSPRNG assertion) during the probes when SystemRoot is dropped."""
 
-    SECRETS = {"TYPESAFE_API_KEY": "secret-value-123", "ANTHROPIC_API_KEY": "secret-value-123",
-               "GITHUB_TOKEN": "secret-value-123", "HTTP_PROXY": "secret-value-123",
-               "HTTPS_PROXY": "secret-value-123", "https_proxy": "secret-value-123",
-               "NO_PROXY": "secret-value-123", "ALL_PROXY": "secret-value-123", "HOME": "/home/someone"}
+    SECRETS = {
+        "TYPESAFE_API_KEY": "secret-value-123",
+        "ANTHROPIC_API_KEY": "secret-value-123",
+        "GITHUB_TOKEN": "secret-value-123",
+        "HTTP_PROXY": "secret-value-123",
+        "HTTPS_PROXY": "secret-value-123",
+        "https_proxy": "secret-value-123",
+        "NO_PROXY": "secret-value-123",
+        "ALL_PROXY": "secret-value-123",
+        "HOME": "/home/someone",
+    }
     WINDOWS = {"PATH": r"C:\node", "systemroot": r"C:\Windows", "SystemDrive": "C:", "windir": r"C:\Windows"}
 
     def probe_env(self, os_name, environ):
@@ -69,8 +76,17 @@ class ProbeEnvTests(IsolatedTestCase):
 
     def test_windows_keeps_system_vars_case_insensitively(self):
         env = self.probe_env("nt", self.WINDOWS)
-        self.assertEqual(env, {"PATH": r"C:\node", "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1",
-                               "SystemRoot": r"C:\Windows", "SYSTEMDRIVE": "C:", "WINDIR": r"C:\Windows"})
+        self.assertEqual(
+            env,
+            {
+                "PATH": r"C:\node",
+                "LANG": "C.UTF-8",
+                "NODE_NO_WARNINGS": "1",
+                "SystemRoot": r"C:\Windows",
+                "SYSTEMDRIVE": "C:",
+                "WINDIR": r"C:\Windows",
+            },
+        )
 
     def test_windows_still_strips_keys_and_proxies(self):
         env = self.probe_env("nt", {**self.WINDOWS, **self.SECRETS})
@@ -78,8 +94,10 @@ class ProbeEnvTests(IsolatedTestCase):
         self.assertNotIn("secret-value-123", env.values())
 
     def test_windows_omits_unset_system_vars(self):
-        self.assertEqual(self.probe_env("nt", {"PATH": r"C:\node", "WINDIR": ""}),
-                         {"PATH": r"C:\node", "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"})
+        self.assertEqual(
+            self.probe_env("nt", {"PATH": r"C:\node", "WINDIR": ""}),
+            {"PATH": r"C:\node", "LANG": "C.UTF-8", "NODE_NO_WARNINGS": "1"},
+        )
 
     def test_posix_is_unchanged(self):
         env = self.probe_env("posix", {**self.WINDOWS, **self.SECRETS, "PATH": "/usr/bin"})
@@ -89,8 +107,11 @@ class ProbeEnvTests(IsolatedTestCase):
         nisi._FLAG_CACHE.clear()
         self.addCleanup(nisi._FLAG_CACHE.clear)
         crashed = subprocess.CompletedProcess(["node", "--help"], 134, b"", b"")
-        with mock.patch.dict(os.environ, self.WINDOWS, clear=True), mock.patch.object(nisi.os, "name", "nt"), \
-                mock.patch.object(nisi.subprocess, "run", return_value=crashed) as run:
+        with (
+            mock.patch.dict(os.environ, self.WINDOWS, clear=True),
+            mock.patch.object(nisi.os, "name", "nt"),
+            mock.patch.object(nisi.subprocess, "run", return_value=crashed) as run,
+        ):
             with self.assertRaises(ToolError) as ctx:
                 nisi.permission_flags(r"C:\node\node.exe", r"C:\work")
         self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
@@ -102,7 +123,7 @@ class ProbeEnvTests(IsolatedTestCase):
 class FakeRunnerTests(IsolatedTestCase):
     """Exercises the Python side with a stand-in for node (used where Node is unavailable)."""
 
-    RUNNER = r'''
+    RUNNER = r"""
 import json, sys
 if "--version" in sys.argv:
     print("v22.0.0"); sys.exit(0)
@@ -121,7 +142,7 @@ report = {"outcome": "COMPLETED", "code": None, "candidate": {"files": files}, "
           "runId": "r", "taskFingerprint": "t", "candidateFingerprint": "c"}
 print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": {"author": [], "reviewer": []},
                   "syntax": {"calc.py": "PASS"}, "seenRequest": sorted(request)}))
-'''
+"""
 
     # The same stand-in, but its help lists the stable permission flag, as Node 22.13+ and 24 do.
     FLAGGED_RUNNER = RUNNER.replace('"  --check  syntax check"', '"  --permission  enable the permission model"')
@@ -164,16 +185,20 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
         argv = seen[0]
         workdir = os.path.dirname(argv[-1])
         self.assertEqual(os.path.basename(argv[-1]), "runner.mjs")
-        self.assertEqual(argv[1:-1], ["--permission", f"--allow-fs-read={workdir}", f"--allow-fs-write={workdir}",
-                                      "--allow-child-process"])
+        self.assertEqual(
+            argv[1:-1],
+            ["--permission", f"--allow-fs-read={workdir}", f"--allow-fs-write={workdir}", "--allow-child-process"],
+        )
 
     def test_flagless_node_is_refused_by_default(self):
         # The stand-in's help lists no permission flag. By default that is a refusal, made before the
         # temporary directory exists and before the runner is started.
         for config in ({}, {"allow_unsandboxed_nisi": False}):
-            with self.subTest(config=config), \
-                    mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp, \
-                    mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner started")) as runner:
+            with (
+                self.subTest(config=config),
+                mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp,
+                mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner started")) as runner,
+            ):
                 with self.assertRaises(ToolError) as ctx:
                     self.run_with("ok", **config)
                 self.assertEqual(ctx.exception.code, "NODE_SANDBOX_UNAVAILABLE")
@@ -203,8 +228,10 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
     def test_no_flag_result_is_not_cached(self):
         # A Node replaced in place by one that lists the flag is accepted without restarting the server.
         switch = self.tmp / "has-flag"
-        fake = write_fake_node(self.tmp / "swapbin", "import os, sys\n"
-                               f"print('  --permission' if os.path.exists({str(switch)!r}) else '  --check')\n")
+        fake = write_fake_node(
+            self.tmp / "swapbin",
+            f"import os, sys\nprint('  --permission' if os.path.exists({str(switch)!r}) else '  --check')\n",
+        )
         nisi._FLAG_CACHE.clear()
         self.addCleanup(nisi._FLAG_CACHE.clear)
         self.assertIsNone(nisi.permission_base(str(fake)))
@@ -227,8 +254,9 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
 
     def test_bounded_run_kills_on_timeout(self):
         fake = write_fake_node(self.tmp / "slow", "import time\ntime.sleep(30)\n")
-        code, out, state = nisi._bounded_run([str(fake)], data=b"", cwd=str(self.tmp), env=dict(os.environ),
-                                             timeout=0.5)
+        code, out, state = nisi._bounded_run(
+            [str(fake)], data=b"", cwd=str(self.tmp), env=dict(os.environ), timeout=0.5
+        )
         self.assertEqual(state, "timeout")
 
 
@@ -240,8 +268,9 @@ class NisiEndToEndTests(IsolatedTestCase):
         super().setUp()
         self.models = FakeModelServer()
         self.addCleanup(self.models.close)
-        self.write_config(model_base_url=self.models.base + "/v1", author_model="author-model",
-                          reviewer_model="reviewer-model")
+        self.write_config(
+            model_base_url=self.models.base + "/v1", author_model="author-model", reviewer_model="reviewer-model"
+        )
 
     def run_tool(self, args):
         result, is_error = tools.call_tool("agiw_nisi_run", args)
@@ -249,13 +278,16 @@ class NisiEndToEndTests(IsolatedTestCase):
         return result
 
     def chat_bodies(self):
-        return [json.loads(record["body"]) for record in self.models.requests
-                if record["path"] == "/v1/chat/completions"]
+        return [
+            json.loads(record["body"]) for record in self.models.requests if record["path"] == "/v1/chat/completions"
+        ]
 
     def test_reasoning_effort_is_sent_only_when_configured(self):
         # Reasoning models on LM Studio return empty content under JSON-schema output unless this is "none".
-        self.models.draft = lambda prompt: {"candidate": {"files": [
-            {"path": "lib.mjs", "content": "export const answer = 42;\n"}]}, "note": "New module."}
+        self.models.draft = lambda prompt: {
+            "candidate": {"files": [{"path": "lib.mjs", "content": "export const answer = 42;\n"}]},
+            "note": "New module.",
+        }
         args = {"task": "Add a module.", "new_files": ["lib.mjs"], "repair_budget": 0}
         result = self.run_tool(args)
         self.assertTrue(self.chat_bodies())
@@ -272,9 +304,12 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertEqual(result["outcome"], "COMPLETED", result)
 
     def test_completed_run_with_no_side_effects(self):
-        self.models.draft = lambda prompt: {"candidate": {"files": [
-            {"path": "calc.py", "content": current(prompt, "calc.py").replace("a - b", "a + b")}]},
-            "note": "Use addition."}
+        self.models.draft = lambda prompt: {
+            "candidate": {
+                "files": [{"path": "calc.py", "content": current(prompt, "calc.py").replace("a - b", "a + b")}]
+            },
+            "note": "Use addition.",
+        }
         project = self.tmp / "project"
         project.mkdir()
         (project / "calc.py").write_text(BROKEN, encoding="utf-8")
@@ -288,11 +323,14 @@ class NisiEndToEndTests(IsolatedTestCase):
         old_cwd = os.getcwd()
         os.chdir(project)
         self.addCleanup(os.chdir, old_cwd)
-        with mock.patch.dict(os.environ, {"HOME": str(home)}), mock.patch.object(tempfile, "tempdir",
-                                                                                str(temp_parent)):
-            result = self.run_tool({"task": "Fix add so it adds.",
-                                    "files": [{"path": "calc.py", "content": BROKEN}],
-                                    "assertions": [{"path": "calc.py", "contains": "a + b"}]})
+        with mock.patch.dict(os.environ, {"HOME": str(home)}), mock.patch.object(tempfile, "tempdir", str(temp_parent)):
+            result = self.run_tool(
+                {
+                    "task": "Fix add so it adds.",
+                    "files": [{"path": "calc.py", "content": BROKEN}],
+                    "assertions": [{"path": "calc.py", "contains": "a + b"}],
+                }
+            )
         self.assertEqual(result["outcome"], "COMPLETED", result)
         self.assertEqual(result["proposedFiles"], [{"path": "calc.py", "status": "modified", "content": FIXED}])
         self.assertEqual(result["syntax"], {"calc.py": "PASS"})
@@ -306,10 +344,16 @@ class NisiEndToEndTests(IsolatedTestCase):
     def test_reviewer_uses_separate_server_when_configured(self):
         reviewer_server = FakeModelServer(models=("reviewer-model",))
         self.addCleanup(reviewer_server.close)
-        self.write_config(model_base_url=self.models.base + "/v1", reviewer_base_url=reviewer_server.base + "/v1",
-                          author_model="author-model", reviewer_model="reviewer-model")
-        self.models.draft = lambda prompt: {"candidate": {"files": [
-            {"path": "lib.mjs", "content": "export const answer = 42;\n"}]}, "note": "New module."}
+        self.write_config(
+            model_base_url=self.models.base + "/v1",
+            reviewer_base_url=reviewer_server.base + "/v1",
+            author_model="author-model",
+            reviewer_model="reviewer-model",
+        )
+        self.models.draft = lambda prompt: {
+            "candidate": {"files": [{"path": "lib.mjs", "content": "export const answer = 42;\n"}]},
+            "note": "New module.",
+        }
         result = self.run_tool({"task": "Add a module.", "new_files": ["lib.mjs"], "repair_budget": 0})
         self.assertEqual(result["outcome"], "COMPLETED", result)
         self.assertEqual(self.models.calls, [("draft", "author-model")])
@@ -318,9 +362,12 @@ class NisiEndToEndTests(IsolatedTestCase):
     @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_failed_probe_refuses_and_is_not_cached(self):
         marker = self.tmp / "started"
-        fake = write_fake_node(self.tmp / "badbin", "import sys, pathlib\n"
-                               "if '--help' in sys.argv: sys.exit(1)\n"
-                               f"pathlib.Path({str(marker)!r}).write_text('started')\n")
+        fake = write_fake_node(
+            self.tmp / "badbin",
+            "import sys, pathlib\n"
+            "if '--help' in sys.argv: sys.exit(1)\n"
+            f"pathlib.Path({str(marker)!r}).write_text('started')\n",
+        )
         nisi._FLAG_CACHE.clear()
         self.addCleanup(nisi._FLAG_CACHE.clear)
         with self.assertRaises(ToolError) as ctx:
@@ -330,14 +377,20 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.write_config(author_model="author-model", reviewer_model="reviewer-model")
         parent = self.tmp / "tmpparent-probe"
         parent.mkdir()
-        with mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))), \
-                mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp:
+        with (
+            mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))),
+            mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp,
+        ):
             for allowed in (False, True):  # the opt-out never turns a failed probe into a run
-                self.write_config(author_model="author-model", reviewer_model="reviewer-model",
-                                  allow_unsandboxed_nisi=allowed)
+                self.write_config(
+                    author_model="author-model", reviewer_model="reviewer-model", allow_unsandboxed_nisi=allowed
+                )
                 with self.assertRaises(ToolError) as ctx:
-                    nisi.run({"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}, load_config(),
-                             temp_parent=str(parent))
+                    nisi.run(
+                        {"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]},
+                        load_config(),
+                        temp_parent=str(parent),
+                    )
                 self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
                 self.assertNotIn(str(fake), nisi._FLAG_CACHE)
         mkdtemp.assert_not_called()
@@ -354,21 +407,26 @@ class NisiEndToEndTests(IsolatedTestCase):
         if os.name == "nt":
             expected |= {"SYSTEMROOT", "WINDIR"}
         self.assertEqual(set(env), expected)
-        self.assertNotIn("secret-value-123",
-                         {value for key, value in env.items() if key not in ("SYSTEMROOT", "WINDIR")})
+        self.assertNotIn(
+            "secret-value-123", {value for key, value in env.items() if key not in ("SYSTEMROOT", "WINDIR")}
+        )
         self.assertEqual((env["HOME"], env["TMPDIR"], env["TMP"], env["TEMP"]), ("/tmp/work",) * 4)
         self.assertEqual((env["LANG"], env["NODE_NO_WARNINGS"]), ("C.UTF-8", "1"))
 
     @unittest.skipIf(os.name == "nt", "the fake node is a POSIX shebang script")
     def test_probes_get_no_keys_or_proxies(self):
         seen = self.tmp / "probe-env.json"
-        fake = write_fake_node(self.tmp / "envbin", "import json, os, pathlib, sys\n"
-                               f"pathlib.Path({str(seen)!r}).write_text(json.dumps(sorted(os.environ)))\n"
-                               "sys.stdout.write('v22.13.0\\n' if '--version' in sys.argv else '  --permission\\n')\n")
+        fake = write_fake_node(
+            self.tmp / "envbin",
+            "import json, os, pathlib, sys\n"
+            f"pathlib.Path({str(seen)!r}).write_text(json.dumps(sorted(os.environ)))\n"
+            "sys.stdout.write('v22.13.0\\n' if '--version' in sys.argv else '  --permission\\n')\n",
+        )
         for name in ("TYPESAFE_API_KEY", "HTTPS_PROXY", "https_proxy", "ALL_PROXY"):
             os.environ[name] = "secret-value-123"
         nisi._FLAG_CACHE.clear()
         self.addCleanup(nisi._FLAG_CACHE.clear)
+
         def check():
             names = json.loads(seen.read_text())
             self.assertIn("PATH", names)
@@ -391,8 +449,11 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.addCleanup(nisi._FLAG_CACHE.clear)
         with mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))):
             with self.assertRaises(ToolError) as ctx:
-                nisi.run({"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}, load_config(),
-                         temp_parent=str(parent))
+                nisi.run(
+                    {"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]},
+                    load_config(),
+                    temp_parent=str(parent),
+                )
         self.assertEqual(ctx.exception.code, "TEMP_DIR_UNSAFE")
         self.assertEqual(os.listdir(parent), [])
 
@@ -400,10 +461,12 @@ class NisiEndToEndTests(IsolatedTestCase):
     def test_permission_flag_detection(self):
         # Node 22.13+ prints both names on one line; Node 24 prints only --permission; early Node 22 only the
         # experimental name. Picking the experimental name on 22.13+ breaks the checker child.
-        helps = {"  --experimental-permission, --permission\n": "--permission",
-                 "  --permission                  enable the permission model\n": "--permission",
-                 "  --experimental-permission     enable the permission model\n": "--experimental-permission",
-                 "  --no-experimental-permission-x\n": None}
+        helps = {
+            "  --experimental-permission, --permission\n": "--permission",
+            "  --permission                  enable the permission model\n": "--permission",
+            "  --experimental-permission     enable the permission model\n": "--experimental-permission",
+            "  --no-experimental-permission-x\n": None,
+        }
         for index, (text, expected) in enumerate(helps.items()):
             fake = write_fake_node(self.tmp / f"bin{index}", f"import sys\nsys.stdout.write({text!r})\n")
             nisi._FLAG_CACHE.clear()
@@ -423,24 +486,36 @@ class NisiEndToEndTests(IsolatedTestCase):
             f"try {{ fs.writeFileSync({json.dumps(str(outside))}, 'x'); console.log('WROTE'); }}\n"
             "catch (error) { console.log(error.code); }\n"
             f"fs.writeFileSync({json.dumps(str(work / 'inside.txt'))}, 'ok'); console.log('INSIDE');\n",
-            encoding="utf-8")
+            encoding="utf-8",
+        )
         flags, sandbox = nisi.permission_flags(node, str(work))
         if sandbox != "node-permission":
             self.skipTest("this Node has no permission model")
-        done = subprocess.run([node, *flags, str(script)], capture_output=True, timeout=30,
-                              env=nisi._child_env(node, str(work)), cwd=str(work))
+        done = subprocess.run(
+            [node, *flags, str(script)],
+            capture_output=True,
+            timeout=30,
+            env=nisi._child_env(node, str(work)),
+            cwd=str(work),
+        )
         self.assertEqual(done.stdout.decode().split(), ["ERR_ACCESS_DENIED", "INSIDE"])
         self.assertFalse(outside.exists())
 
     def test_syntax_error_is_repaired(self):
-        self.models.draft = lambda prompt: {"candidate": {"files": [
-            {"path": "calc.py", "content": "def add(a, b)\n    return a + b\n"}]}, "note": "Draft."}
+        self.models.draft = lambda prompt: {
+            "candidate": {"files": [{"path": "calc.py", "content": "def add(a, b)\n    return a + b\n"}]},
+            "note": "Draft.",
+        }
         seen = {}
 
         def repair(prompt):
             seen["stages"] = prompt["stages"]
-            return {"status": "REPAIRED", "candidate": {"files": [{"path": "calc.py", "content": FIXED}]},
-                    "note": "Add the missing colon."}
+            return {
+                "status": "REPAIRED",
+                "candidate": {"files": [{"path": "calc.py", "content": FIXED}]},
+                "note": "Add the missing colon.",
+            }
+
         self.models.repair = repair
         result = self.run_tool({"task": "Fix add.", "files": [{"path": "calc.py", "content": BROKEN}]})
         self.assertEqual(result["outcome"], "COMPLETED", result)
@@ -450,8 +525,10 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertIn("calc.py", failed["evidence"]["findings"][0]["message"])
 
     def test_unchanged_draft_ends_without_progress(self):
-        self.models.draft = lambda prompt: {"candidate": {"files": [
-            {"path": "calc.py", "content": current(prompt, "calc.py")}]}, "note": "No change."}
+        self.models.draft = lambda prompt: {
+            "candidate": {"files": [{"path": "calc.py", "content": current(prompt, "calc.py")}]},
+            "note": "No change.",
+        }
         result = self.run_tool({"task": "Fix add.", "files": [{"path": "calc.py", "content": BROKEN}]})
         self.assertEqual(result["outcome"], "NO_PROGRESS")
         self.assertFalse(result["completed"])
@@ -462,8 +539,10 @@ class NisiEndToEndTests(IsolatedTestCase):
         # 20 empty files with ~200-character names made one finding over Nisi's 2048-character limit,
         # which Nisi refused (TESTS_FINDING_INVALID) instead of letting repair see what was wrong.
         paths = ["pkg/" + "/".join(["n" * 60] * 3) + f"/f{index:02d}.txt" for index in range(20)]
-        self.models.draft = lambda prompt: {"candidate": {"files": [{"path": path, "content": ""} for path in paths]},
-                                            "note": "Empty files."}
+        self.models.draft = lambda prompt: {
+            "candidate": {"files": [{"path": path, "content": ""} for path in paths]},
+            "note": "Empty files.",
+        }
         result = self.run_tool({"task": "Add files.", "new_files": paths, "repair_budget": 0})
         tests_stage = [stage for stage in result["stages"] if stage["stage"] == "tests"][0]
         failure = tests_stage["failures"][0]
@@ -472,10 +551,14 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.assertIn("and 15 more", failure["message"])
 
     def test_reviewer_findings_fail_the_run(self):
-        self.models.draft = lambda prompt: {"candidate": {"files": [
-            {"path": "lib.mjs", "content": "export const answer = 42;\n"}]}, "note": "New module."}
-        self.models.review = lambda prompt: {"findings": [{"code": "NAMING", "message": "Name is unclear."}],
-                                             "summary": "One naming issue."}
+        self.models.draft = lambda prompt: {
+            "candidate": {"files": [{"path": "lib.mjs", "content": "export const answer = 42;\n"}]},
+            "note": "New module.",
+        }
+        self.models.review = lambda prompt: {
+            "findings": [{"code": "NAMING", "message": "Name is unclear."}],
+            "summary": "One naming issue.",
+        }
         result = self.run_tool({"task": "Add a module.", "new_files": ["lib.mjs"], "repair_budget": 0})
         self.assertEqual(result["outcome"], "FAILED")
         self.assertEqual(result["syntax"], {"lib.mjs": "PASS"}, result)
@@ -484,13 +567,20 @@ class NisiEndToEndTests(IsolatedTestCase):
     def test_javascript_syntax_checks_by_module_kind(self):
         # node --check runs on stdin under the permission model; given a path it would resolve parent
         # folders the model refuses (seen on Node 22 in CI), and every file would report FAIL.
-        files = {"ok.mjs": "export const answer = 42;\n", "ok.cjs": "module.exports = { answer: 42 };\n",
-                 "esm.js": "export default function f() { return 1; }\n", "bad.mjs": "export const a = 1;\nconst = ;\n"}
-        self.models.draft = lambda prompt: {"candidate": {"files": [
-            {"path": path, "content": content} for path, content in files.items()]}, "note": "Four modules."}
+        files = {
+            "ok.mjs": "export const answer = 42;\n",
+            "ok.cjs": "module.exports = { answer: 42 };\n",
+            "esm.js": "export default function f() { return 1; }\n",
+            "bad.mjs": "export const a = 1;\nconst = ;\n",
+        }
+        self.models.draft = lambda prompt: {
+            "candidate": {"files": [{"path": path, "content": content} for path, content in files.items()]},
+            "note": "Four modules.",
+        }
         result = self.run_tool({"task": "Add modules.", "new_files": sorted(files), "repair_budget": 0})
-        self.assertEqual(result["syntax"], {"ok.mjs": "PASS", "ok.cjs": "PASS", "esm.js": "PASS", "bad.mjs": "FAIL"},
-                         result)
+        self.assertEqual(
+            result["syntax"], {"ok.mjs": "PASS", "ok.cjs": "PASS", "esm.js": "PASS", "bad.mjs": "FAIL"}, result
+        )
         static = [stage for stage in result["stages"] if stage["stage"] == "staticChecks"][0]
         messages = " ".join(finding["message"] for finding in static["findings"])
         self.assertIn("bad.mjs:2", messages)

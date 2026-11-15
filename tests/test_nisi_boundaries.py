@@ -20,8 +20,9 @@ class BoundedRunTests(IsolatedTestCase):
         fake = write_fake_node(self.tmp / "bin", "import os, time\nos.write(1, b'x' * 200000)\ntime.sleep(30)\n")
         started = time.monotonic()
         with mock.patch.object(nisi, "STDOUT_CAP", 1024):
-            code, out, state = nisi._bounded_run([str(fake)], data=b"", cwd=str(self.tmp),
-                                                 env=dict(os.environ), timeout=10)
+            code, out, state = nisi._bounded_run(
+                [str(fake)], data=b"", cwd=str(self.tmp), env=dict(os.environ), timeout=10
+            )
         self.assertEqual(state, "overflow")
         self.assertLess(time.monotonic() - started, 5)
         self.assertLessEqual(len(out), 1024)
@@ -29,12 +30,14 @@ class BoundedRunTests(IsolatedTestCase):
 
     def test_bounded_run_timeout_kills_grandchildren(self):
         pid_file = self.tmp / "grandchild.pid"
-        fake = write_fake_node(self.tmp / "bin", "import pathlib, subprocess, time\n"
-                               "child = subprocess.Popen(['sleep', '30'])\n"
-                               f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
-                               "time.sleep(30)\n")
-        _, _, state = nisi._bounded_run([str(fake)], data=b"", cwd=str(self.tmp),
-                                        env=dict(os.environ), timeout=0.5)
+        fake = write_fake_node(
+            self.tmp / "bin",
+            "import pathlib, subprocess, time\n"
+            "child = subprocess.Popen(['sleep', '30'])\n"
+            f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+            "time.sleep(30)\n",
+        )
+        _, _, state = nisi._bounded_run([str(fake)], data=b"", cwd=str(self.tmp), env=dict(os.environ), timeout=0.5)
         self.assertEqual(state, "timeout")
         pid = int(pid_file.read_text())
 
@@ -78,14 +81,15 @@ class VendorCopyTests(IsolatedTestCase):
         self.write_config(author_model="author-model", reviewer_model="reviewer-model")
         parent = self.tmp / "runs"
         parent.mkdir()
-        with mock.patch.object(nisi, "verify_vendor", return_value={}), \
-                mock.patch.object(nisi, "VENDOR_DIR", root), \
-                mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
-                mock.patch.object(nisi, "permission_base", return_value=["--permission"]), \
-                mock.patch.object(nisi, "_bounded_run") as runner:
+        with (
+            mock.patch.object(nisi, "verify_vendor", return_value={}),
+            mock.patch.object(nisi, "VENDOR_DIR", root),
+            mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))),
+            mock.patch.object(nisi, "permission_base", return_value=["--permission"]),
+            mock.patch.object(nisi, "_bounded_run") as runner,
+        ):
             with self.assertRaises(ToolError) as ctx:
-                nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(),
-                         temp_parent=str(parent))
+                nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(), temp_parent=str(parent))
         self.assertEqual(ctx.exception.code, "NISI_UNVERIFIED")
         self.assertEqual(ctx.exception.details["nisiCode"], "NISI_HASH_MISMATCH")
         runner.assert_not_called()
@@ -108,17 +112,17 @@ class VendorCopyTests(IsolatedTestCase):
 
 class RunBoundaryTests(IsolatedTestCase):
     def test_run_maps_overflow_to_output_too_large(self):
-        self.write_config(author_model="author-model", reviewer_model="reviewer-model",
-                          allow_unsandboxed_nisi=True)
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model", allow_unsandboxed_nisi=True)
         parent = self.tmp / "runs"
         parent.mkdir()
-        with mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
-                mock.patch.object(nisi, "permission_base", return_value=None), \
-                mock.patch.object(nisi, "permission_flags", return_value=([], "none")), \
-                mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")):
+        with (
+            mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))),
+            mock.patch.object(nisi, "permission_base", return_value=None),
+            mock.patch.object(nisi, "permission_flags", return_value=([], "none")),
+            mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")),
+        ):
             with self.assertRaises(ToolError) as ctx:
-                nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(),
-                         temp_parent=str(parent))
+                nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(), temp_parent=str(parent))
         self.assertEqual(ctx.exception.code, "NISI_OUTPUT_TOO_LARGE")
         self.assertEqual(list(parent.iterdir()), [])
 
@@ -127,9 +131,11 @@ class RunBoundaryTests(IsolatedTestCase):
         # before the vendored files are verified or a temporary directory is made.
         self.write_config(author_model="author-model", reviewer_model="reviewer-model")
         nisi._FLAG_CACHE.clear()
-        with mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
-                mock.patch.object(nisi, "verify_vendor") as verify, \
-                mock.patch.object(nisi.tempfile, "mkdtemp") as mkdtemp:
+        with (
+            mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))),
+            mock.patch.object(nisi, "verify_vendor") as verify,
+            mock.patch.object(nisi.tempfile, "mkdtemp") as mkdtemp,
+        ):
             with self.assertRaises(ToolError) as ctx:
                 nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config())
         self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
@@ -142,16 +148,18 @@ class RunBoundaryTests(IsolatedTestCase):
         parent = self.tmp / "runs"
         parent.mkdir()
         for allowed, expected in ((False, "NODE_SANDBOX_UNAVAILABLE"), (True, "NISI_OUTPUT_TOO_LARGE")):
-            self.write_config(author_model="author-model", reviewer_model="reviewer-model",
-                              allow_unsandboxed_nisi=allowed)
-            with self.subTest(allowed=allowed), \
-                    mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
-                    mock.patch.object(nisi, "permission_base", return_value=["--permission"]), \
-                    mock.patch.object(nisi, "permission_flags", return_value=([], "none")), \
-                    mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")) as runner:
+            self.write_config(
+                author_model="author-model", reviewer_model="reviewer-model", allow_unsandboxed_nisi=allowed
+            )
+            with (
+                self.subTest(allowed=allowed),
+                mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))),
+                mock.patch.object(nisi, "permission_base", return_value=["--permission"]),
+                mock.patch.object(nisi, "permission_flags", return_value=([], "none")),
+                mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")) as runner,
+            ):
                 with self.assertRaises(ToolError) as ctx:
-                    nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(),
-                             temp_parent=str(parent))
+                    nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(), temp_parent=str(parent))
                 self.assertEqual(ctx.exception.code, expected)
                 self.assertEqual(runner.called, allowed)
                 self.assertEqual(list(parent.iterdir()), [])
@@ -162,14 +170,15 @@ class RunBoundaryTests(IsolatedTestCase):
         parent.mkdir()
         self.write_config(author_model="author-model", reviewer_model="reviewer-model")
         for flags in ([], ["--allow-fs-read=/x", "--allow-fs-write=/x"], ["--permission-audit"]):
-            with self.subTest(flags=flags), \
-                    mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))), \
-                    mock.patch.object(nisi, "permission_base", return_value=["--permission"]), \
-                    mock.patch.object(nisi, "permission_flags", return_value=(flags, "node-permission")), \
-                    mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")) as runner:
+            with (
+                self.subTest(flags=flags),
+                mock.patch.object(nisi, "find_node", return_value=("unused-node", (24, 0, 0))),
+                mock.patch.object(nisi, "permission_base", return_value=["--permission"]),
+                mock.patch.object(nisi, "permission_flags", return_value=(flags, "node-permission")),
+                mock.patch.object(nisi, "_bounded_run", return_value=(None, b"", "overflow")) as runner,
+            ):
                 with self.assertRaises(ToolError) as ctx:
-                    nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(),
-                             temp_parent=str(parent))
+                    nisi.run({"task": "Add a module", "new_files": ["a.py"]}, load_config(), temp_parent=str(parent))
                 self.assertEqual(ctx.exception.code, "NODE_SANDBOX_UNAVAILABLE")
                 runner.assert_not_called()
                 self.assertEqual(list(parent.iterdir()), [])
@@ -177,8 +186,9 @@ class RunBoundaryTests(IsolatedTestCase):
 
 class SummarizeTests(IsolatedTestCase):
     def summarize(self, files, *, outcome="COMPLETED", original="original"):
-        request = nisi.validate_request({"task": "Change files", "files": [{"path": "a.py", "content": original}],
-                                         "new_files": ["b.py"]})
+        request = nisi.validate_request(
+            {"task": "Change files", "files": [{"path": "a.py", "content": original}], "new_files": ["b.py"]}
+        )
         return nisi._summarize({"report": {"outcome": outcome, "candidate": {"files": files}}}, request, "none")
 
     def test_unchanged_status(self):
@@ -187,9 +197,11 @@ class SummarizeTests(IsolatedTestCase):
 
     def test_proposed_files_over_the_cap_are_refused(self):
         with mock.patch.object(nisi, "MAX_OUTPUT_CONTENT_BYTES", 10):
-            for files in ([{"path": "a.py", "content": "x" * 11}],
-                          [{"path": "a.py", "content": "x" * 6}, {"path": "b.py", "content": "x" * 5}],
-                          [{"path": "a.py", "content": "é" * 6}]):
+            for files in (
+                [{"path": "a.py", "content": "x" * 11}],
+                [{"path": "a.py", "content": "x" * 6}, {"path": "b.py", "content": "x" * 5}],
+                [{"path": "a.py", "content": "é" * 6}],
+            ):
                 with self.subTest(files=files), self.assertRaises(ToolError) as ctx:
                     self.summarize(files)
                 self.assertEqual(ctx.exception.code, "NISI_OUTPUT_TOO_LARGE")

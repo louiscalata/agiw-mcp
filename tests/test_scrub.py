@@ -71,7 +71,9 @@ class ScrubTests(IsolatedTestCase):
         folder.mkdir()
         (folder / "a.txt").write_text(
             "http://127.0.0.1:1234/v1\n~/.local/share\nversion 110.0.1.2\nthreading.local()\n"
-            "github.com/" + OWNER + "/agiw-mcp@v0.1.0\nBearer <key>\n", encoding="utf-8")
+            "github.com/" + OWNER + "/agiw-mcp@v0.1.0\nBearer <key>\n",
+            encoding="utf-8",
+        )
         self.assertEqual(scrub_check.scan(folder), [])
 
 

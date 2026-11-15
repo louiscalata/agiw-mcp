@@ -7,6 +7,7 @@ the code under test runs with AGIW_MCP_TEST_MODE=1 (which refuses non-loopback
 URLs), and the guard below refuses any socket connection to a non-loopback
 address from inside the test process.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -74,10 +75,20 @@ socket.socket.connect_ex = _guarded_connect_ex
 socket.getaddrinfo = _guarded_getaddrinfo
 
 
-CLEARED_ENV = ("TYPESAFE_API_KEY", "AGIW_MCP_MODEL_BASE_URL", "AGIW_MCP_AUTHOR_MODEL", "AGIW_MCP_REVIEWER_MODEL",
-               "AGIW_MCP_JEV_URL", "AGIW_MCP_TEST_OS_KEYSTORE", "XDG_CONFIG_HOME",
-               "AGIW_MCP_REASONING_EFFORT", "AGIW_MCP_BASE_URL", "AGIW_MCP_TICKET_DIR",
-               "AGIW_MCP_REVIEWER_BASE_URL")
+CLEARED_ENV = (
+    "TYPESAFE_API_KEY",
+    "AGIW_MCP_MODEL_BASE_URL",
+    "AGIW_MCP_AUTHOR_MODEL",
+    "AGIW_MCP_REVIEWER_MODEL",
+    "AGIW_MCP_JEV_URL",
+    "AGIW_MCP_TEST_OS_KEYSTORE",
+    "XDG_CONFIG_HOME",
+    "AGIW_MCP_REASONING_EFFORT",
+    "AGIW_MCP_BASE_URL",
+    "AGIW_MCP_TICKET_DIR",
+    "AGIW_MCP_REVIEWER_BASE_URL",
+)
+
 
 class IsolatedTestCase(unittest.TestCase):
     """Test mode on, a private config dir, and no inherited keys or model settings."""
@@ -98,13 +109,20 @@ class IsolatedTestCase(unittest.TestCase):
 
     def grant_consent(self) -> None:
         from agiw_mcp import consent
+
         consent.grant(consent.disclosure_sha256())
 
 
 def subprocess_env(config_dir: Path, **extra) -> dict:
     env = {key: value for key, value in os.environ.items() if key not in CLEARED_ENV}
-    env.update({"AGIW_MCP_TEST_MODE": "1", "AGIW_MCP_CONFIG_DIR": str(config_dir), "PYTHONPATH": str(SRC),
-                "PYTHONDONTWRITEBYTECODE": "1"})
+    env.update(
+        {
+            "AGIW_MCP_TEST_MODE": "1",
+            "AGIW_MCP_CONFIG_DIR": str(config_dir),
+            "PYTHONPATH": str(SRC),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+    )
     env.update(extra)
     return env
 
@@ -118,12 +136,17 @@ def tree_snapshot(root: Path) -> dict:
         for name in files:
             path = Path(base, name)
             data = path.read_bytes()
-            result[str(path.relative_to(root))] = ("file", len(data), hashlib.sha256(data).hexdigest(),
-                                                   path.stat().st_mtime_ns)
+            result[str(path.relative_to(root))] = (
+                "file",
+                len(data),
+                hashlib.sha256(data).hexdigest(),
+                path.stat().st_mtime_ns,
+            )
     return result
 
 
 # --- fake servers ----------------------------------------------------------
+
 
 class _Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
@@ -176,9 +199,13 @@ class FakeServer:
 
 def chat_envelope(model: str, content: dict | str) -> dict:
     text = content if isinstance(content, str) else json.dumps(content)
-    return {"id": "chatcmpl-test", "object": "chat.completion", "model": model,
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+    return {
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "model": model,
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
 
 
 class FakeModelServer(FakeServer):
@@ -212,6 +239,7 @@ class FakeModelServer(FakeServer):
 def jev_answers(phase: str, values: dict | None = None, model: str = "jev-1.14.0") -> dict:
     """A well-formed Jev response for the fixed questions; values maps id -> number."""
     from agiw_mcp.questions import QUESTIONS
+
     answers = {}
     for qid, question in QUESTIONS[phase].items():
         value = (values or {}).get(qid, 0.1 if question["type"] == "noul" else 0)
@@ -221,6 +249,7 @@ def jev_answers(phase: str, values: dict | None = None, model: str = "jev-1.14.0
 
 def node_available() -> bool:
     from agiw_mcp import nisi
+
     path, version = nisi.find_node()
     return bool(path and version and version >= nisi.MIN_NODE)
 

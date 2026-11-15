@@ -23,8 +23,12 @@ def frame(message) -> bytes:
     return json.dumps(message).encode() + b"\n"
 
 
-INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}
+INIT = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}},
+}
 
 
 class RpcTests(IsolatedTestCase):
@@ -33,27 +37,40 @@ class RpcTests(IsolatedTestCase):
             with self.subTest(value=type(value).__name__):
                 raw = rpc.encode({"jsonrpc": "2.0", "id": "request-id", "result": value})
                 self.assertTrue(raw.endswith(b"\n"))
-                self.assertEqual(json.loads(raw), {"jsonrpc": "2.0", "id": "request-id",
-                                                  "error": {"code": -32603, "message": "Internal error"}})
+                self.assertEqual(
+                    json.loads(raw),
+                    {"jsonrpc": "2.0", "id": "request-id", "error": {"code": -32603, "message": "Internal error"}},
+                )
 
     def test_encode_oversized_response(self):
         with mock.patch.object(rpc, "MAX_OUTPUT_BYTES", 256):
             raw = rpc.encode({"jsonrpc": "2.0", "id": 7, "result": "x" * 257})
         self.assertLess(len(raw), 256)
-        self.assertEqual(json.loads(raw), {"jsonrpc": "2.0", "id": 7,
-                                          "error": {"code": -32603, "message": "Response too large"}})
+        self.assertEqual(
+            json.loads(raw), {"jsonrpc": "2.0", "id": 7, "error": {"code": -32603, "message": "Response too large"}}
+        )
 
     def test_initialize_list_and_call(self):
-        replies = exchange(frame(INIT), frame({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-                           frame({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-                           frame({"jsonrpc": "2.0", "id": "c", "method": "tools/call",
-                                  "params": {"name": "agiw_consent", "arguments": {"action": "show"}}}))
+        replies = exchange(
+            frame(INIT),
+            frame({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            frame({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+            frame(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "c",
+                    "method": "tools/call",
+                    "params": {"name": "agiw_consent", "arguments": {"action": "show"}},
+                }
+            ),
+        )
         self.assertEqual(len(replies), 3)
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
         self.assertEqual(replies[0]["result"]["serverInfo"]["name"], "agiw-mcp")
         names = [tool["name"] for tool in replies[1]["result"]["tools"]]
-        self.assertEqual(names, ["agiw_readiness", "agiw_status", "agiw_consent", "agiw_jev_pre", "agiw_jev_post",
-                                 "agiw_nisi_run"])
+        self.assertEqual(
+            names, ["agiw_readiness", "agiw_status", "agiw_consent", "agiw_jev_pre", "agiw_jev_post", "agiw_nisi_run"]
+        )
         for tool in replies[1]["result"]["tools"]:
             self.assertEqual(tool["inputSchema"]["type"], "object")
             self.assertFalse(tool["inputSchema"]["additionalProperties"])
@@ -74,12 +91,12 @@ class RpcTests(IsolatedTestCase):
     def test_tools_list_rejects_a_cursor(self):
         for cursor in ("next", "", 0, None):
             with self.subTest(cursor=cursor):
-                reply = exchange(frame({"jsonrpc": "2.0", "id": 1, "method": "tools/list",
-                                        "params": {"cursor": cursor}}))[0]
+                reply = exchange(
+                    frame({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"cursor": cursor}})
+                )[0]
                 self.assertEqual(reply["error"]["code"], -32602)
                 self.assertIsNone(reply["error"].get("data"))
-        listed = exchange(frame({"jsonrpc": "2.0", "id": 2, "method": "tools/list",
-                                 "params": {"_meta": {}}}))[0]
+        listed = exchange(frame({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": {}}}))[0]
         self.assertEqual(len(listed["result"]["tools"]), 6)
 
     def test_unknown_protocol_version_gets_latest(self):
@@ -88,31 +105,46 @@ class RpcTests(IsolatedTestCase):
         self.assertEqual(reply["result"]["protocolVersion"], rpc.SUPPORTED_PROTOCOLS[0])
 
     def test_error_codes(self):
-        replies = exchange(b"{not json\n",
-                           frame([INIT]),
-                           frame({"jsonrpc": "2.0", "id": 3, "method": "nope"}),
-                           frame({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-                                  "params": {"name": "missing_tool", "arguments": {}}}),
-                           frame({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": 7}}),
-                           frame({"jsonrpc": "2.0", "id": True, "method": "ping"}),
-                           frame({"jsonrpc": "1.0", "id": 6, "method": "ping"}),
-                           b'{"jsonrpc":"2.0","id":7,"id":8,"method":"ping"}\n',
-                           frame({"jsonrpc": "2.0", "id": 9, "method": "ping"}))
+        replies = exchange(
+            b"{not json\n",
+            frame([INIT]),
+            frame({"jsonrpc": "2.0", "id": 3, "method": "nope"}),
+            frame(
+                {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "missing_tool", "arguments": {}}}
+            ),
+            frame({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": 7}}),
+            frame({"jsonrpc": "2.0", "id": True, "method": "ping"}),
+            frame({"jsonrpc": "1.0", "id": 6, "method": "ping"}),
+            b'{"jsonrpc":"2.0","id":7,"id":8,"method":"ping"}\n',
+            frame({"jsonrpc": "2.0", "id": 9, "method": "ping"}),
+        )
         codes = [reply.get("error", {}).get("code") for reply in replies]
         self.assertEqual(codes, [-32700, -32600, -32601, -32602, -32602, -32600, -32600, -32700, None])
         self.assertEqual(replies[-1], {"jsonrpc": "2.0", "id": 9, "result": {}})
 
     def test_a_frame_that_is_neither_request_nor_response_is_answered(self):
-        replies = exchange(frame([INIT]), frame({"jsonrpc": "2.0", "id": 11}),
-                           frame({"jsonrpc": "2.0", "id": 12, "result": {}}),
-                           frame({"jsonrpc": "2.0", "id": 13, "method": "ping"}))
+        replies = exchange(
+            frame([INIT]),
+            frame({"jsonrpc": "2.0", "id": 11}),
+            frame({"jsonrpc": "2.0", "id": 12, "result": {}}),
+            frame({"jsonrpc": "2.0", "id": 13, "method": "ping"}),
+        )
         # The bare {"id": 11} frame gets Invalid Request; a real response (id 12) still gets no reply.
-        self.assertEqual([(reply.get("id"), reply.get("error", {}).get("code")) for reply in replies[1:]],
-                         [(11, -32600), (13, None)])
+        self.assertEqual(
+            [(reply.get("id"), reply.get("error", {}).get("code")) for reply in replies[1:]], [(11, -32600), (13, None)]
+        )
 
     def test_tool_errors_are_results_not_protocol_errors(self):
-        reply = exchange(frame({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                                "params": {"name": "agiw_readiness", "arguments": {"bogus": 1}}}))[0]
+        reply = exchange(
+            frame(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "agiw_readiness", "arguments": {"bogus": 1}},
+                }
+            )
+        )[0]
         self.assertTrue(reply["result"]["isError"])
         self.assertEqual(reply["result"]["structuredContent"]["error"]["code"], "INPUT_INVALID")
 
@@ -124,18 +156,42 @@ class RpcTests(IsolatedTestCase):
 
     def test_internal_errors_hide_details(self):
         from unittest import mock
+
         with mock.patch.object(rpc, "call_tool", side_effect=RuntimeError("secret detail")):
-            reply = exchange(frame({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                                    "params": {"name": "agiw_status", "arguments": {}}}))[0]
+            reply = exchange(
+                frame(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "agiw_status", "arguments": {}},
+                    }
+                )
+            )[0]
         self.assertEqual(reply["error"], {"code": -32603, "message": "Internal error"})
 
     def test_stdio_subprocess_smoke(self):
-        frames = frame(INIT) + frame({"jsonrpc": "2.0", "method": "notifications/initialized"}) + \
-            frame({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}) + \
-            frame({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                   "params": {"name": "agiw_readiness", "arguments": {}}})
-        done = subprocess.run([sys.executable, "-B", "-m", "agiw_mcp"], input=frames, capture_output=True,
-                              timeout=60, cwd=str(ROOT), env=subprocess_env(self.config_dir))
+        frames = (
+            frame(INIT)
+            + frame({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            + frame({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+            + frame(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "agiw_readiness", "arguments": {}},
+                }
+            )
+        )
+        done = subprocess.run(
+            [sys.executable, "-B", "-m", "agiw_mcp"],
+            input=frames,
+            capture_output=True,
+            timeout=60,
+            cwd=str(ROOT),
+            env=subprocess_env(self.config_dir),
+        )
         self.assertEqual(done.returncode, 0, done.stderr)
         replies = [json.loads(line) for line in done.stdout.splitlines()]
         self.assertEqual([reply["id"] for reply in replies], [1, 2, 3])

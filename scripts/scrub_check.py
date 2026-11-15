@@ -10,6 +10,7 @@ virtual environments and caches. Only this file's own pattern definitions,
 between the scrub-patterns markers, are allowlisted. Matches are reported as
 path:line and rule name; the matched text itself is never printed.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -18,8 +19,18 @@ from pathlib import Path
 import re
 import sys
 
-SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".mypy_cache", ".ruff_cache",
-             ".pytest_cache", "build", "dist"}
+SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "node_modules",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    "build",
+    "dist",
+}
 SKIP_SUFFIXES = (".egg-info",)
 MAX_FILE_BYTES = 8 * 1024 * 1024
 
@@ -40,11 +51,13 @@ RULES = [
 ]
 # Private machine names are listed by the SHA-256 of their lowercase form, so this file does not
 # spell them out. A whole host-name token (letters, digits, hyphens) matches in any case.
-PRIVATE_HOST_SHA256 = frozenset({
-    "c343f22db1ccf3c7378465e406621b270a02f17eab045863b23c1b592d8edeb3",
-    "2b94b5d80b5bc4a12b6058ced1bb434a02e026a4cbead6a28b310d2dca1508fb",
-    "b38ebe1a739174bcdd0095c2b59fcb0d61506cb9e8731bc953e30bce3dc99586",
-})
+PRIVATE_HOST_SHA256 = frozenset(
+    {
+        "c343f22db1ccf3c7378465e406621b270a02f17eab045863b23c1b592d8edeb3",
+        "2b94b5d80b5bc4a12b6058ced1bb434a02e026a4cbead6a28b310d2dca1508fb",
+        "b38ebe1a739174bcdd0095c2b59fcb0d61506cb9e8731bc953e30bce3dc99586",
+    }
+)
 HOST_TOKEN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*", re.IGNORECASE)
 # scrub-patterns-end
 
@@ -96,8 +109,10 @@ def scan(root: Path) -> list[tuple[str, int, str]]:
 
 
 def _has_private_host(line: str) -> bool:
-    return any(hashlib.sha256(token.lower().encode("utf-8")).hexdigest() in PRIVATE_HOST_SHA256
-               for token in HOST_TOKEN.findall(line))
+    return any(
+        hashlib.sha256(token.lower().encode("utf-8")).hexdigest() in PRIVATE_HOST_SHA256
+        for token in HOST_TOKEN.findall(line)
+    )
 
 
 def main(argv: list[str]) -> int:

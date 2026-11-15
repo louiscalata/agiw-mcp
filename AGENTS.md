@@ -47,7 +47,7 @@ Fail closed on vendor hashes, tickets, keys, and model URLs.
 
 From a checkout with Python 3.10 or newer and an activated virtual
 environment, install the linter and builder with
-`python3 -m pip install ruff build`. Scrub prints
+`python3 -m pip install ruff==0.17.4 build`. Scrub prints
 `scrub check passed`. `compileall -q` is silent on success. Tests end with
 `OK`. `python3 -m build` writes `dist/`.
 
@@ -55,6 +55,7 @@ environment, install the linter and builder with
 python3 scripts/scrub_check.py
 python3 -m compileall -q src
 ruff check src tests scripts
+ruff format --check src tests scripts
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v
 python3 -m build
 ```
@@ -66,12 +67,14 @@ python3 -m build
 use the existing Mac runner (`mac-m5`); same-repo Windows jobs use the PC
 (`pc-win`). Fork pull requests use GitHub-hosted runners.
 
+- `lint`: Ruff 0.17.4, pinned. `ruff check` and `ruff format --check` on `src`,
+  `tests`, and `scripts`.
 - `test`: Python 3.10, 3.12, and 3.13 with Node 22, plus Python 3.13 with
   Node 24, on Linux and macOS. Scrub, `compileall -q src`, and unit tests.
   `fail-fast` is false.
 - `python-only`: Python 3.12 with Node hidden, so the fake runner runs.
-- `distribution`: Ruff, then `python -m build`, then install the wheel and
-  the sdist outside the checkout.
+- `distribution`: `python -m build`, then install the wheel and the sdist
+  outside the checkout.
 - `uv-git-install`: install this commit, `--version`, the stdio handshake, and MCP Inspector `tools/list`.
 - `windows`: Python 3.12 and Node 22. Scrub, compile, and unit tests.
   Ticket-admission tests are skipped. Admission itself stays refused.
@@ -86,9 +89,10 @@ use the existing Mac runner (`mac-m5`); same-repo Windows jobs use the PC
   `from __future__ import annotations`, a copyright line, and
   `SPDX-License-Identifier: Apache-2.0`.
 - Keep runtime dependencies empty. Tests stay on loopback fakes.
-- Ruff selects `E`, `F`, `W`, and `B`, line length 120, target `py310`.
-  `src/agiw_mcp/questions.py` ignores `E501` because that text is part of
-  the consent disclosure.
+- Python style is [docs/python-style.md](docs/python-style.md). `ruff format`
+  owns layout; the rule set, line length 120, target `py310`, and the
+  per-file ignores are in `pyproject.toml`. `src/agiw_mcp/questions.py`
+  ignores `E501` because that text is part of the consent disclosure.
 - Use US spellings in documentation.
 - A `ToolError` is an MCP result with `isError`, not a JSON-RPC protocol
   error. Unknown `config.json` keys are refused. A model URL must be
