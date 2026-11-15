@@ -123,34 +123,106 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
                   "syntax": {"calc.py": "PASS"}, "seenRequest": sorted(request)}))
 '''
 
-    def run_with(self, mode):
-        fake = write_fake_node(self.tmp / "bin", self.RUNNER % mode)
-        self.write_config(author_model="author-model", reviewer_model="reviewer-model")
+    # The same stand-in, but its help lists the stable permission flag, as Node 22.13+ and 24 do.
+    FLAGGED_RUNNER = RUNNER.replace('"  --check  syntax check"', '"  --permission  enable the permission model"')
+    ARGS = {"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}
+
+    def run_with(self, mode, *, runner=None, **config):
+        fake = write_fake_node(self.tmp / "bin", (runner or self.RUNNER) % mode)
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model", **config)
         nisi._FLAG_CACHE.clear()
         self.addCleanup(nisi._FLAG_CACHE.clear)
         parent = self.tmp / "tmpparent"
-        parent.mkdir()
+        parent.mkdir(exist_ok=True)
         with mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))):
             try:
-                return nisi.run({"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]},
-                                load_config(), temp_parent=str(parent))
+                return nisi.run(dict(self.ARGS), load_config(), temp_parent=str(parent))
             finally:
                 self.assertEqual(os.listdir(parent), [], "temporary directory was not removed")
 
     def test_fake_runner_round_trip(self):
-        result = self.run_with("ok")
+        result = self.run_with("ok", allow_unsandboxed_nisi=True)
         self.assertEqual(result["outcome"], "COMPLETED")
         self.assertEqual(result["proposedFiles"], [{"path": "calc.py", "status": "modified", "content": FIXED}])
         self.assertEqual(result["sandbox"], "none")
 
+    def test_flag_listing_node_runs_with_default_config(self):
+        self.assertEqual(self.FLAGGED_RUNNER.count("--permission"), 1)
+        seen = []
+        real_run = nisi._bounded_run
+
+        def recording_run(argv, **kwargs):
+            seen.append(list(argv))
+            return real_run(argv, **kwargs)
+
+        with mock.patch.object(nisi, "_bounded_run", recording_run):
+            result = self.run_with("ok", runner=self.FLAGGED_RUNNER)
+        self.assertEqual(result["outcome"], "COMPLETED")
+        self.assertEqual(result["sandbox"], "node-permission")
+        # The command that was actually started carries the flags, limited to the run's own directory.
+        self.assertEqual(len(seen), 1)
+        argv = seen[0]
+        workdir = os.path.dirname(argv[-1])
+        self.assertEqual(os.path.basename(argv[-1]), "runner.mjs")
+        self.assertEqual(argv[1:-1], ["--permission", f"--allow-fs-read={workdir}", f"--allow-fs-write={workdir}",
+                                      "--allow-child-process"])
+
+    def test_flagless_node_is_refused_by_default(self):
+        # The stand-in's help lists no permission flag. By default that is a refusal, made before the
+        # temporary directory exists and before the runner is started.
+        for config in ({}, {"allow_unsandboxed_nisi": False}):
+            with self.subTest(config=config), \
+                    mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp, \
+                    mock.patch.object(nisi, "_bounded_run", side_effect=AssertionError("runner started")) as runner:
+                with self.assertRaises(ToolError) as ctx:
+                    self.run_with("ok", **config)
+                self.assertEqual(ctx.exception.code, "NODE_SANDBOX_UNAVAILABLE")
+                mkdtemp.assert_not_called()
+                runner.assert_not_called()
+        message = ctx.exception.message
+        self.assertIn("allow_unsandboxed_nisi", message)
+        self.assertIn("--permission", message)
+        self.assertNotIn(str(self.tmp), message)
+        self.assertEqual(ctx.exception.details, {})
+
+    def test_flagless_refusal_through_the_tool(self):
+        fake = write_fake_node(self.tmp / "bin", self.RUNNER % "ok")
+        self.write_config(author_model="author-model", reviewer_model="reviewer-model")
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        with mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))):
+            result, is_error = tools.call_tool("agiw_nisi_run", dict(self.ARGS))
+            self.assertTrue(is_error)
+            self.assertEqual(result["error"]["code"], "NODE_SANDBOX_UNAVAILABLE")
+            self.assertNotIn(str(self.tmp), json.dumps(result))
+            # The key is not a tool argument: the closed argument set still refuses it.
+            result, is_error = tools.call_tool("agiw_nisi_run", {**self.ARGS, "allow_unsandboxed_nisi": True})
+            self.assertTrue(is_error)
+            self.assertEqual(result["error"]["code"], "INPUT_INVALID")
+
+    def test_no_flag_result_is_not_cached(self):
+        # A Node replaced in place by one that lists the flag is accepted without restarting the server.
+        switch = self.tmp / "has-flag"
+        fake = write_fake_node(self.tmp / "swapbin", "import os, sys\n"
+                               f"print('  --permission' if os.path.exists({str(switch)!r}) else '  --check')\n")
+        nisi._FLAG_CACHE.clear()
+        self.addCleanup(nisi._FLAG_CACHE.clear)
+        self.assertIsNone(nisi.permission_base(str(fake)))
+        self.assertEqual(nisi.sandbox_label(str(fake)), "none")
+        self.assertNotIn(str(fake), nisi._FLAG_CACHE)
+        switch.write_text("")
+        self.assertEqual(nisi.permission_base(str(fake)), ["--permission"])
+        self.assertEqual(nisi.sandbox_label(str(fake)), "node-permission")
+        self.assertEqual(nisi.permission_flags(str(fake), "/work")[1], "node-permission")
+
     def test_garbage_output_is_refused(self):
         with self.assertRaises(ToolError) as ctx:
-            self.run_with("garbage")
+            self.run_with("garbage", allow_unsandboxed_nisi=True)
         self.assertEqual(ctx.exception.code, "NISI_RUNNER_FAILED")
 
     def test_out_of_scope_file_is_refused(self):
         with self.assertRaises(ToolError) as ctx:
-            self.run_with("escape")
+            self.run_with("escape", allow_unsandboxed_nisi=True)
         self.assertEqual(ctx.exception.code, "NISI_RUNNER_FAILED")
 
     def test_bounded_run_kills_on_timeout(self):
@@ -258,11 +330,17 @@ class NisiEndToEndTests(IsolatedTestCase):
         self.write_config(author_model="author-model", reviewer_model="reviewer-model")
         parent = self.tmp / "tmpparent-probe"
         parent.mkdir()
-        with mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))):
-            with self.assertRaises(ToolError) as ctx:
-                nisi.run({"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}, load_config(),
-                         temp_parent=str(parent))
-        self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
+        with mock.patch.object(nisi, "find_node", return_value=(str(fake), (22, 0, 0))), \
+                mock.patch.object(nisi.tempfile, "mkdtemp", side_effect=AssertionError("mkdtemp")) as mkdtemp:
+            for allowed in (False, True):  # the opt-out never turns a failed probe into a run
+                self.write_config(author_model="author-model", reviewer_model="reviewer-model",
+                                  allow_unsandboxed_nisi=allowed)
+                with self.assertRaises(ToolError) as ctx:
+                    nisi.run({"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}, load_config(),
+                             temp_parent=str(parent))
+                self.assertEqual(ctx.exception.code, "NODE_UNAVAILABLE")
+                self.assertNotIn(str(fake), nisi._FLAG_CACHE)
+        mkdtemp.assert_not_called()
         self.assertFalse(marker.exists(), "Node was started without a sandbox")
         self.assertEqual(os.listdir(parent), [])
 
@@ -305,7 +383,7 @@ class NisiEndToEndTests(IsolatedTestCase):
 
     @unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
     def test_comma_in_temp_path_is_refused(self):
-        fake = write_fake_node(self.tmp / "bin", FakeRunnerTests.RUNNER % "ok")
+        fake = write_fake_node(self.tmp / "bin", FakeRunnerTests.FLAGGED_RUNNER % "ok")
         self.write_config(author_model="author-model", reviewer_model="reviewer-model")
         parent = self.tmp / "a,b"
         parent.mkdir()

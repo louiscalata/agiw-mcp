@@ -14,6 +14,13 @@ Reasoning effort accepts "none", "low", "medium" or
 Nisi's chat requests.
 require_ticket (default false) makes agiw_nisi_run refuse any request without an
 admissible claim ticket; a ticket passed in the arguments is enforced either way.
+allow_unsandboxed_nisi (default false) lets agiw_nisi_run start on a Node whose
+help lists no permission-model flag; by default such a run is refused with
+NODE_SANDBOX_UNAVAILABLE. The key is read only from config.json: no environment
+variable sets it and it is not a tool argument. The environment still chooses
+which config.json is read (AGIW_MCP_CONFIG_DIR, or APPDATA, XDG_CONFIG_HOME and
+the home directory), so whoever sets the server's launch environment can select
+a file that sets it.
 The Jev endpoint is not configurable.
 """
 from __future__ import annotations
@@ -44,7 +51,7 @@ _ITEM_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _JEV_MODEL = re.compile(r"jev-(?:latest|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\Z")
 _KEYS = frozenset({"model_base_url", "reviewer_base_url", "author_model", "reviewer_model", "keychain_service",
                    "keychain_account", "jev_model", "max_output_tokens", "reasoning_effort",
-                   "require_ticket"})
+                   "require_ticket", "allow_unsandboxed_nisi"})
 _ENV = {"model_base_url": "AGIW_MCP_BASE_URL", "author_model": "AGIW_MCP_AUTHOR_MODEL",
         "reviewer_model": "AGIW_MCP_REVIEWER_MODEL", "reasoning_effort": "AGIW_MCP_REASONING_EFFORT",
         "reviewer_base_url": "AGIW_MCP_REVIEWER_BASE_URL"}
@@ -142,6 +149,9 @@ class Config:
     reasoning_effort: str | None = None
     # When true, agiw_nisi_run refuses requests without an admissible claim ticket (see tickets.py).
     require_ticket: bool = False
+    # When true, agiw_nisi_run may start on a Node that lists no permission-model flag (sandbox "none").
+    # File only: deliberately absent from _ENV.
+    allow_unsandboxed_nisi: bool = False
     # Optional separate loopback server for the reviewer; None means use model_base_url.
     reviewer_base_url: str | None = None
     source: str = "defaults"
@@ -172,6 +182,7 @@ class Config:
                 "keychain_account": self.keychain_account, "jev_model": self.jev_model,
                 "max_output_tokens": self.max_output_tokens, "reasoning_effort": self.reasoning_effort,
                 "require_ticket": self.require_ticket, "reviewer_base_url": self.reviewer_base_url,
+                "allow_unsandboxed_nisi": self.allow_unsandboxed_nisi,
                 "source": self.source}
 
 
@@ -206,9 +217,9 @@ def _validate(values: dict) -> dict:
             if value is not None and value not in REASONING_EFFORTS:
                 raise ValueError("reasoning_effort must be none, low, medium or high")
             out[key] = value
-        elif key == "require_ticket":
+        elif key in ("require_ticket", "allow_unsandboxed_nisi"):
             if type(value) is not bool:
-                raise ValueError("require_ticket must be true or false")
+                raise ValueError(f"{key} must be true or false")
             out[key] = value
     return out
 

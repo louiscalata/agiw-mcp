@@ -96,9 +96,32 @@ implemented here. The table does not cover every practice in that guide.
 - If Node's help lists `--permission` or `--experimental-permission`, the
   runner uses that permission model with file reads and writes limited to the
   temporary directory. When both flags are listed, `--permission` is preferred.
-  If neither flag is listed, the current implementation proceeds without
-  permission flags and reports `sandbox: "none"`; it does not refuse unsupported
-  permission models, and there is no refusal code for that case.
+  If neither flag is listed, the run is refused with
+  `NODE_SANDBOX_UNAVAILABLE`. Setting `allow_unsandboxed_nisi` to `true` in
+  `config.json` turns that refusal off: the runner then starts without
+  permission flags, has no file-access limit and reports `sandbox: "none"`.
+  A "neither flag" result is not cached, so each run asks Node again. With
+  the key set, such a run asks `node --help` twice: before the temporary
+  directory is created and again when the command line is built. A failure of
+  the second probe refuses with `NODE_UNAVAILABLE` and the directory is removed.
+- The permission check runs after ticket admission and before the temporary
+  directory is created, so ticket refusals come first and involve no Node
+  process. A ticketed run refused by this check has created its ticket lock
+  files and removes them before returning. The per-install `identity.key` in
+  the ticket directory stays, as after any admitted run. A second check on the final
+  command line refuses a runner without permission flags unless the key is
+  true.
+- `allow_unsandboxed_nisi` is read only from `config.json`. No environment
+  variable sets it and it is not a tool argument, so an MCP tool caller cannot
+  set it. It sits behind the same boundary as the consent record, which has two
+  parts: same-user write access to the config directory, and the server's
+  launch environment. `AGIW_MCP_CONFIG_DIR` selects the config directory;
+  otherwise `APPDATA` on Windows, `XDG_CONFIG_HOME` on other non-macOS systems,
+  or the home directory decide it. Whoever sets that environment, for example
+  in the `env` block of the client file that starts the server (for Cursor
+  that can be a file inside the project), can point the server at a directory
+  they control and so choose a `config.json` that sets the key, and a
+  `consent.json`, without writing the user's config directory.
 - A comma in the resolved temporary directory path refuses the run with
   `TEMP_DIR_UNSAFE`, since Node interprets file access allowlists as
   comma-separated paths. Use a `TMPDIR` without a comma.
@@ -134,7 +157,10 @@ In scope:
 - An MCP caller trying to use the Jev tools without a recorded consent file,
   or to make agiw-mcp send the key or text somewhere other than TypeSafe.
 - Leaking the key or local paths through error messages, logs or tool output.
-- A Nisi run changing files outside its temporary directory.
+- A Nisi run changing files outside its temporary directory. This rests on
+  Node's permission model. A Node without one is refused by default; with
+  `allow_unsandboxed_nisi` set to `true` nothing limits the runner's file
+  access.
 - Malformed or hostile model output (oversized, invalid JSON, out-of-scope
   paths, code that would do harm if run).
 - Malformed JSON-RPC input (oversized lines, invalid frames).

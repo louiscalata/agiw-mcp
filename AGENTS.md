@@ -136,6 +136,12 @@ Scopes compare case-insensitively and under Unicode normalization. Equal
 scopes and `/` prefixes overlap and are refused before Node starts. Windows
 device names in a scope part are refused.
 
+After admission, `agiw_nisi_run` checks Node before it creates the temporary
+directory. A Node whose help lists no permission flag is refused with
+`NODE_SANDBOX_UNAVAILABLE` unless `allow_unsandboxed_nisi` is true in
+`config.json`. Keep that key out of the environment variables and out of the
+tool arguments. A failed `node --help` refuses with `NODE_UNAVAILABLE`.
+
 The ticket is released when the run ends, including on failure. On Windows,
 admission raises `TICKET_UNSUPPORTED_PLATFORM` before the ticket directory is
 touched. State lives in `tickets/` under the config directory, or in the

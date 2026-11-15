@@ -151,6 +151,12 @@ def status_tool(args: dict) -> dict:
         config_info, config_error = None, exc.message
         config_directory = config_path = None
     node_path, node_version = nisi.find_node()
+    node_sandbox = None  # null when Node is missing, too old to run Nisi, or the probe failed
+    if node_path and node_version and node_version >= nisi.MIN_NODE:
+        try:
+            node_sandbox = nisi.sandbox_label(node_path)
+        except ToolError:
+            pass
     try:
         nisi_info = nisi.verify_vendor()
         nisi_info["verified"] = True
@@ -162,7 +168,8 @@ def status_tool(args: dict) -> dict:
         "python": {"version": platform.python_version(), "executable": display_path(sys.executable)},
         "platform": sys.platform,
         "node": {"path": display_path(node_path) if node_path else None,
-                 "version": ".".join(map(str, node_version)) if node_version else None},
+                 "version": ".".join(map(str, node_version)) if node_version else None,
+                 "sandbox": node_sandbox},
         "nisi": nisi_info,
         "configDir": config_directory,
         "configFile": config_path,
