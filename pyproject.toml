@@ -42,12 +42,63 @@ agiw_mcp = [
     "vendor/nisi/package/*/*",
 ]
 
+# Ruff is pinned in CI (.github/workflows/ci.yml, job `lint`). See docs/python-style.md.
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+# The vendored Nisi bundle is hashed file by file (vendor/nisi/manifest.json); never lint or format it.
+extend-exclude = ["src/agiw_mcp/vendor"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+docstring-code-format = false
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "B"]
+select = [
+    "E",       # pycodestyle errors, including E501 at line-length
+    "F",       # pyflakes
+    "W",       # pycodestyle warnings
+    "B",       # bugbear
+    "I",       # import order
+    "UP",      # pyupgrade, limited by target-version
+    "N",       # pep8-naming
+    "C90",     # mccabe complexity
+    "BLE",     # broad except needs `# noqa: BLE001 - <reason>`
+    "T20",     # no print() in library modules
+    "RUF100",  # unused noqa
+    "RUF102",  # invalid rule code in noqa
+]
+# Five existing exception classes (KeyUnavailable, NetworkRefused, HttpFailure, _FrameTooLarge, NetworkBlocked)
+# are imported across modules and tests; renaming them is not a style fix. New ones still end in Error.
+ignore = ["N818"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+known-first-party = ["agiw_mcp"]
 
 [tool.ruff.lint.per-file-ignores]
+# The consent disclosure is hashed at runtime (consent.disclosure_sha256); its text is not rewrapped.
 "src/agiw_mcp/questions.py" = ["E501"]
+# CLI entry point and scripts print by design.
+"src/agiw_mcp/__main__.py" = ["T20"]
+"scripts/*.py" = ["T20"]
+# do_GET/do_POST aliases on fake HTTP handlers mirror http.server names.
+"tests/support.py" = ["N815"]
+# Import-order baseline. Sorting imports reorders the AST, so it lands in its own reviewed change;
+# remove a file from this list when its imports are sorted. New files are checked.
+"scripts/suite_compat.py" = ["I001"]
+"src/agiw_mcp/net.py" = ["I001"]
+"src/agiw_mcp/rpc.py" = ["I001"]
+"tests/test_cli.py" = ["I001"]
+"tests/test_net.py" = ["I001"]
+"tests/test_nisi_http_timeout.py" = ["I001"]
+"tests/test_review_regressions.py" = ["I001"]
+"tests/test_rpc.py" = ["I001"]
+"tests/test_stale_locks.py" = ["I001"]
+"tests/test_stdio_handshake.py" = ["I001"]

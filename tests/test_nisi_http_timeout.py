@@ -1,6 +1,7 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
 """Model calls use loopback node:http, not undici's 300s headers timeout."""
+
 import json
 import subprocess
 import sys
@@ -34,10 +35,18 @@ class _Handler(BaseHTTPRequestHandler):
             content = {"findings": [], "summary": "Inspected the change."}
         else:
             content = {"candidate": {"files": [{"path": "a.py", "content": "value = 1\n"}]}, "note": "edit"}
-        payload = json.dumps({"model": body["model"], "choices": [{
-            "finish_reason": "stop",
-            "message": {"role": "assistant", "content": json.dumps(content)},
-        }], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
+        payload = json.dumps(
+            {
+                "model": body["model"],
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": json.dumps(content)},
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        ).encode()
         try:
             self.close_connection = True
             self.send_response(200)
@@ -68,16 +77,33 @@ class LoopbackTimeoutTests(IsolatedTestCase):
         work.mkdir()
         nisi._copy_verified(nisi.VENDOR_DIR, work)
         node, _version = nisi.find_node()
-        request = {"schema": 1, "taskText": "change value", "files": [{"path": "a.py", "content": "value = 0\n"}],
-                   "allowedFiles": ["a.py"], "acceptanceCriteria": ["change value"], "assertions": [],
-                   "repairBudget": 0, "deadlineMs": deadline_ms,
-                   "endpoint": f"http://127.0.0.1:{server.server_address[1]}/v1/chat/completions",
-                   "authorModel": "author", "reviewerModel": "reviewer", "maxOutputTokens": 1000,
-                   "language": "python", "python": sys.executable, "checkTimeoutMs": 1000}
+        request = {
+            "schema": 1,
+            "taskText": "change value",
+            "files": [{"path": "a.py", "content": "value = 0\n"}],
+            "allowedFiles": ["a.py"],
+            "acceptanceCriteria": ["change value"],
+            "assertions": [],
+            "repairBudget": 0,
+            "deadlineMs": deadline_ms,
+            "endpoint": f"http://127.0.0.1:{server.server_address[1]}/v1/chat/completions",
+            "authorModel": "author",
+            "reviewerModel": "reviewer",
+            "maxOutputTokens": 1000,
+            "language": "python",
+            "python": sys.executable,
+            "checkTimeoutMs": 1000,
+        }
         env = nisi._child_env(node, str(work))
         env["AGIW_MCP_UNDICI_HEADERS_TIMEOUT_MS"] = str(undici_ms)
-        done = subprocess.run([node, str(work / "runner.mjs")], input=json.dumps(request).encode(),
-                              capture_output=True, cwd=work, env=env, timeout=40)
+        done = subprocess.run(
+            [node, str(work / "runner.mjs")],
+            input=json.dumps(request).encode(),
+            capture_output=True,
+            cwd=work,
+            env=env,
+            timeout=40,
+        )
         self.assertIn(done.returncode, (0, 2), done.stderr.decode())
         return json.loads(done.stdout), done.returncode
 

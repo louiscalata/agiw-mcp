@@ -6,6 +6,7 @@ Every message is written by this package. Callers never copy exception text,
 subprocess output or response bodies into a ToolError, so a refusal cannot leak
 a key, a path or provider output by accident.
 """
+
 from __future__ import annotations
 
 

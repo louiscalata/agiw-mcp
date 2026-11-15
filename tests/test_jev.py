@@ -50,6 +50,7 @@ class JevTests(IsolatedTestCase):
         self.grant_consent()
         error = self.assert_refused("KEY_UNAVAILABLE")
         from agiw_mcp.keys import KEY_UNAVAILABLE_MESSAGE
+
         self.assertEqual(error.message, KEY_UNAVAILABLE_MESSAGE)
         self.assertEqual(self.server.requests, [])
 
@@ -139,10 +140,15 @@ class JevTests(IsolatedTestCase):
     def test_key_never_appears_in_any_tool_output(self):
         self.grant_consent()
         os.environ["TYPESAFE_API_KEY"] = FAKE_KEY
-        outputs = [tools.call_tool(name, args) for name, args in (
-            ("agiw_status", {}), ("agiw_consent", {"action": "show"}),
-            ("agiw_jev_pre", {"task": "Add a retry to the uploader."}),
-            ("agiw_jev_post", {"report": "Added the retry. Verdict: READY"}))]
+        outputs = [
+            tools.call_tool(name, args)
+            for name, args in (
+                ("agiw_status", {}),
+                ("agiw_consent", {"action": "show"}),
+                ("agiw_jev_pre", {"task": "Add a retry to the uploader."}),
+                ("agiw_jev_post", {"report": "Added the retry. Verdict: READY"}),
+            )
+        ]
         # Upstream errors that echo the key or the request headers must not carry it back out.
         self.responses.append((401, {"error": "invalid key " + FAKE_KEY}))
         outputs.append(tools.call_tool("agiw_jev_pre", {"task": "Add a retry to the uploader."}))
@@ -158,8 +164,16 @@ class JevTests(IsolatedTestCase):
         os.environ["TYPESAFE_API_KEY"] = FAKE_KEY
         task = "Rotate the uploader credentials marker-9d2e"
         body = jev_answers("pre")
-        body["usage"] = {"input_tokens": 12, "output_tokens": 3, "debug": "Bearer " + FAKE_KEY, "echo": task,
-                         "nested": {"k": FAKE_KEY}, "Bad Key": 5, "negative": -1, "flag": True}
+        body["usage"] = {
+            "input_tokens": 12,
+            "output_tokens": 3,
+            "debug": "Bearer " + FAKE_KEY,
+            "echo": task,
+            "nested": {"k": FAKE_KEY},
+            "Bad Key": 5,
+            "negative": -1,
+            "flag": True,
+        }
         self.responses.append((200, body))
         result = self.call("pre", task)
         self.assertEqual(result["usage"], {"input_tokens": 12, "output_tokens": 3})

@@ -6,6 +6,7 @@ Local checks run in a fixed order and stop at the first missing prerequisite.
 Optional Jev checks follow; key presence is checked only after consent. On Linux
 the key lookup discards its output. Nothing here contacts TypeSafe.
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,17 +29,25 @@ def _check(check_id: str, ok: bool, detail: str, fix: str | None = None) -> dict
 
 def check_python() -> dict:
     version = ".".join(str(part) for part in sys.version_info[:3])
-    return _check("python", sys.version_info[:2] >= MIN_PYTHON, f"Python {version}",
-                  "Install Python 3.10 or newer and reinstall agiw-mcp with it.")
+    return _check(
+        "python",
+        sys.version_info[:2] >= MIN_PYTHON,
+        f"Python {version}",
+        "Install Python 3.10 or newer and reinstall agiw-mcp with it.",
+    )
 
 
 def check_config() -> tuple[dict, Config | None]:
     try:
         config = load_config()
     except ConfigError as exc:
-        return _check("config", False, exc.message,
-                      "Fix AGIW_MCP_CONFIG_DIR or config.json; see "
-                      "'Configuration file and environment variables' in the README's Setup details."), None
+        return _check(
+            "config",
+            False,
+            exc.message,
+            "Fix AGIW_MCP_CONFIG_DIR or config.json; see "
+            "'Configuration file and environment variables' in the README's Setup details.",
+        ), None
     return _check("config", True, f"Configuration from {config.source}"), config
 
 
@@ -48,34 +57,54 @@ def check_node(config: Config | None = None) -> dict:
     Without a valid configuration the default (not allowed) applies."""
     path, version = nisi.find_node()
     if not path:
-        return _check("node", False, "node was not found on PATH",
-                      "Install Node.js 22 or newer (https://nodejs.org) and make sure `node` is on the PATH "
-                      "of the MCP client that starts agiw-mcp.")
+        return _check(
+            "node",
+            False,
+            "node was not found on PATH",
+            "Install Node.js 22 or newer (https://nodejs.org) and make sure `node` is on the PATH "
+            "of the MCP client that starts agiw-mcp.",
+        )
     if not version:
-        return _check("node", False, f"{display_path(path)} did not report a version within 3 s",
-                      "Check that `node --version` works in a terminal, then restart the MCP client.")
+        return _check(
+            "node",
+            False,
+            f"{display_path(path)} did not report a version within 3 s",
+            "Check that `node --version` works in a terminal, then restart the MCP client.",
+        )
     text = ".".join(str(part) for part in version)
     if version < nisi.MIN_NODE:
-        return _check("node", False, f"Node {text} at {display_path(path)} is older than 22",
-                      "Upgrade Node.js to 22 or newer.")
+        return _check(
+            "node", False, f"Node {text} at {display_path(path)} is older than 22", "Upgrade Node.js to 22 or newer."
+        )
     try:
         sandbox = nisi.sandbox_label(path)
     except ToolError:
-        return _check("node", False, f"Node {text} at {display_path(path)}: its permission model could not be "
-                      "checked (node --help failed)",
-                      "Check that `node --help` works in a terminal, then run agiw_readiness again.")
+        return _check(
+            "node",
+            False,
+            f"Node {text} at {display_path(path)}: its permission model could not be checked (node --help failed)",
+            "Check that `node --help` works in a terminal, then run agiw_readiness again.",
+        )
     if sandbox == "none":
         if config is None or not config.allow_unsandboxed_nisi:
             try:
                 where = display_path(config_file_path())
             except ConfigError:
                 where = "config.json"
-            return _check("node", False, f"Node {text} at {display_path(path)} lists no permission-model flag, "
-                          "so agiw_nisi_run refuses to start it (NODE_SANDBOX_UNAVAILABLE)",
-                          "Use a Node.js 22 or newer whose `node --help` lists --permission, or set "
-                          f'"allow_unsandboxed_nisi": true in {where} to run Nisi without a file-access limit.')
-        return _check("node", True, f"Node {text} at {display_path(path)} (sandbox: none, allowed by "
-                      "allow_unsandboxed_nisi; Nisi runs have no file-access limit)")
+            return _check(
+                "node",
+                False,
+                f"Node {text} at {display_path(path)} lists no permission-model flag, "
+                "so agiw_nisi_run refuses to start it (NODE_SANDBOX_UNAVAILABLE)",
+                "Use a Node.js 22 or newer whose `node --help` lists --permission, or set "
+                f'"allow_unsandboxed_nisi": true in {where} to run Nisi without a file-access limit.',
+            )
+        return _check(
+            "node",
+            True,
+            f"Node {text} at {display_path(path)} (sandbox: none, allowed by "
+            "allow_unsandboxed_nisi; Nisi runs have no file-access limit)",
+        )
     return _check("node", True, f"Node {text} at {display_path(path)} (sandbox: {sandbox})")
 
 
@@ -83,53 +112,84 @@ def check_nisi() -> dict:
     try:
         info = nisi.verify_vendor()
     except nisi.NisiError as exc:
-        return _check("nisi", False, f"Vendored Nisi failed verification ({exc.code})",
-                      "Reinstall agiw-mcp so the vendored Nisi v0.2.0 files match their manifest.")
+        return _check(
+            "nisi",
+            False,
+            f"Vendored Nisi failed verification ({exc.code})",
+            "Reinstall agiw-mcp so the vendored Nisi v0.2.0 files match their manifest.",
+        )
     return _check("nisi", True, f"Nisi {info['version']}: {info['files']} files match the pinned manifest")
 
 
 def check_models(config: Config) -> dict:
     author, reviewer = config.author_model, config.reviewer_model
     if not author or not reviewer:
-        return _check("models", False, "author_model and reviewer_model are not both configured",
-                      f"Set two different model IDs, for example in {display_path(config_file_path())}: "
-                      '{"author_model": "<author model id>", "reviewer_model": "<reviewer model id>"}, '
-                      "or with AGIW_MCP_AUTHOR_MODEL and AGIW_MCP_REVIEWER_MODEL.")
+        return _check(
+            "models",
+            False,
+            "author_model and reviewer_model are not both configured",
+            f"Set two different model IDs, for example in {display_path(config_file_path())}: "
+            '{"author_model": "<author model id>", "reviewer_model": "<reviewer model id>"}, '
+            "or with AGIW_MCP_AUTHOR_MODEL and AGIW_MCP_REVIEWER_MODEL.",
+        )
     if author == reviewer:
-        return _check("models", False, "author_model and reviewer_model are the same model",
-                      "Choose a different reviewer_model so the review is independent of the author.")
+        return _check(
+            "models",
+            False,
+            "author_model and reviewer_model are the same model",
+            "Choose a different reviewer_model so the review is independent of the author.",
+        )
     if config.effective_reviewer_base_url == config.model_base_url:
         listed, failed = _list_models(config.models_endpoint, "model_base_url")
         if failed:
             return failed
         if author not in listed and reviewer not in listed:
-            return _check("models", False,
-                          f"{config.models_endpoint} lists neither author_model {author!r} nor reviewer_model "
-                          f"{reviewer!r}; a different server may be on that port.",
-                          "Set model_base_url in config.json or AGIW_MCP_BASE_URL in the MCP client's environment "
-                          "to your model server's base URL (for example http://127.0.0.1:1234/v1), "
-                          "then load the configured models there or choose model IDs it lists.")
+            return _check(
+                "models",
+                False,
+                f"{config.models_endpoint} lists neither author_model {author!r} nor reviewer_model "
+                f"{reviewer!r}; a different server may be on that port.",
+                "Set model_base_url in config.json or AGIW_MCP_BASE_URL in the MCP client's environment "
+                "to your model server's base URL (for example http://127.0.0.1:1234/v1), "
+                "then load the configured models there or choose model IDs it lists.",
+            )
         for role, model in (("author_model", author), ("reviewer_model", reviewer)):
             if model not in listed:
-                return _check("models", False, f"{role} {model!r} is not listed by {config.models_endpoint}",
-                              f"Download or load {model!r} in your model server, or change {role} to a listed "
-                              "model ID.")
-        return _check("models", True, f"{config.models_endpoint} lists author {author!r} and reviewer {reviewer!r} "
-                      "(JSON-schema output is not tested here)")
+                return _check(
+                    "models",
+                    False,
+                    f"{role} {model!r} is not listed by {config.models_endpoint}",
+                    f"Download or load {model!r} in your model server, or change {role} to a listed model ID.",
+                )
+        return _check(
+            "models",
+            True,
+            f"{config.models_endpoint} lists author {author!r} and reviewer {reviewer!r} "
+            "(JSON-schema output is not tested here)",
+        )
     # A separate reviewer server: each model must be listed by its own server.
     for role, model, endpoint, url_key in (
-            ("author_model", author, config.models_endpoint, "model_base_url"),
-            ("reviewer_model", reviewer, config.reviewer_models_endpoint, "reviewer_base_url")):
+        ("author_model", author, config.models_endpoint, "model_base_url"),
+        ("reviewer_model", reviewer, config.reviewer_models_endpoint, "reviewer_base_url"),
+    ):
         listed, failed = _list_models(endpoint, url_key)
         if failed:
             return failed
         if model not in listed:
-            return _check("models", False, f"{role} {model!r} is not listed by {endpoint}",
-                          f"Load {model!r} on the server at {url_key}, change {role} to a model ID it lists, "
-                          f"or point {url_key} at the server that has it.")
-    return _check("models", True, f"{config.models_endpoint} lists author {author!r} and "
-                  f"{config.reviewer_models_endpoint} lists reviewer {reviewer!r} "
-                  "(JSON-schema output is not tested here)")
+            return _check(
+                "models",
+                False,
+                f"{role} {model!r} is not listed by {endpoint}",
+                f"Load {model!r} on the server at {url_key}, change {role} to a model ID it lists, "
+                f"or point {url_key} at the server that has it.",
+            )
+    return _check(
+        "models",
+        True,
+        f"{config.models_endpoint} lists author {author!r} and "
+        f"{config.reviewer_models_endpoint} lists reviewer {reviewer!r} "
+        "(JSON-schema output is not tested here)",
+    )
 
 
 def _list_models(endpoint: str, url_key: str):
@@ -137,20 +197,33 @@ def _list_models(endpoint: str, url_key: str):
     try:
         _, body = request_json(endpoint, timeout=PROBE_TIMEOUT, max_bytes=1024 * 1024)
     except NetworkRefused:
-        return None, _check("models", False, "The model endpoint URL was refused by policy",
-                            f"Use a loopback {url_key} such as http://127.0.0.1:1234/v1.")
+        return None, _check(
+            "models",
+            False,
+            "The model endpoint URL was refused by policy",
+            f"Use a loopback {url_key} such as http://127.0.0.1:1234/v1.",
+        )
     except HttpFailure as failure:
         if failure.kind == "busy":
-            return None, _check("models", False, "Local HTTP workers are busy; nothing was sent.",
-                                "Wait for an in-flight request to finish, then check readiness again.")
-        detail = {"http": f"{endpoint} returned HTTP {failure.status}",
-                  "invalid_json": f"{endpoint} did not return JSON",
-                  "too_large": f"{endpoint} returned more than 1 MiB",
-                  "redirect": f"{endpoint} redirected"}.get(
-            failure.kind, f"{endpoint} was not reachable within {PROBE_TIMEOUT:g} s")
-        return None, _check("models", False, detail,
-                            "Start your local OpenAI-compatible server (for example LM Studio's server on port "
-                            f"1234) or set {url_key} to the address it listens on.")
+            return None, _check(
+                "models",
+                False,
+                "Local HTTP workers are busy; nothing was sent.",
+                "Wait for an in-flight request to finish, then check readiness again.",
+            )
+        detail = {
+            "http": f"{endpoint} returned HTTP {failure.status}",
+            "invalid_json": f"{endpoint} did not return JSON",
+            "too_large": f"{endpoint} returned more than 1 MiB",
+            "redirect": f"{endpoint} redirected",
+        }.get(failure.kind, f"{endpoint} was not reachable within {PROBE_TIMEOUT:g} s")
+        return None, _check(
+            "models",
+            False,
+            detail,
+            "Start your local OpenAI-compatible server (for example LM Studio's server on port "
+            f"1234) or set {url_key} to the address it listens on.",
+        )
     data = body.get("data") if isinstance(body, dict) else None
     listed = {item.get("id") for item in data if isinstance(item, dict)} if isinstance(data, list) else set()
     return listed, None
@@ -164,11 +237,15 @@ def check_key(config: Config) -> dict:
     if presence["present"]:
         return _check("jev_key", True, f"TypeSafe API key present ({presence['source']}); value not shown")
     if sys.platform == "darwin":
-        fix = (f"Run `security add-generic-password -s {config.keychain_service} -a {config.keychain_account} -w` "
-               "and type the key at the prompt, or set TYPESAFE_API_KEY in the MCP client's environment.")
+        fix = (
+            f"Run `security add-generic-password -s {config.keychain_service} -a {config.keychain_account} -w` "
+            "and type the key at the prompt, or set TYPESAFE_API_KEY in the MCP client's environment."
+        )
     elif sys.platform.startswith("linux"):
-        fix = (f"Run `secret-tool store --label='agiw-mcp TypeSafe' service {config.keychain_service} "
-               f"account {config.keychain_account}` and type the key at the prompt, or set TYPESAFE_API_KEY.")
+        fix = (
+            f"Run `secret-tool store --label='agiw-mcp TypeSafe' service {config.keychain_service} "
+            f"account {config.keychain_account}` and type the key at the prompt, or set TYPESAFE_API_KEY."
+        )
     else:
         fix = "Set TYPESAFE_API_KEY in the environment of the MCP client that starts agiw-mcp."
     return _check("jev_key", False, "No TypeSafe API key found", fix)
@@ -177,9 +254,13 @@ def check_key(config: Config) -> dict:
 def check_consent() -> dict:
     if consent.consent_recorded():
         return _check("consent", True, "Consent to send task and result text to TypeSafe is recorded")
-    return _check("consent", False, "Consent to send task and result text to TypeSafe is not recorded",
-                  "Call agiw_consent with action \"show\" and let the user read it; if they agree, they run "
-                  "`agiw-mcp consent grant` in a terminal.")
+    return _check(
+        "consent",
+        False,
+        "Consent to send task and result text to TypeSafe is not recorded",
+        'Call agiw_consent with action "show" and let the user read it; if they agree, they run '
+        "`agiw-mcp consent grant` in a terminal.",
+    )
 
 
 def evaluate(stop_at_first: bool = True) -> dict:
@@ -192,22 +273,32 @@ def evaluate(stop_at_first: bool = True) -> dict:
 
     def models_step() -> dict:
         if holder.get("config") is None:
-            return _check("models", False, "Not checked because the configuration is invalid",
-                          "Fix the configuration first.")
+            return _check(
+                "models", False, "Not checked because the configuration is invalid", "Fix the configuration first."
+            )
         return check_models(holder["config"])
 
     def key_step() -> dict:
         # Looking for the key comes after consent: on Linux the Secret Service lookup returns the secret.
         if not consent.consent_recorded():
-            return _check("jev_key", False, "Not checked until consent is recorded",
-                          "Grant consent first (`agiw-mcp consent grant`), then run agiw_readiness again.")
+            return _check(
+                "jev_key",
+                False,
+                "Not checked until consent is recorded",
+                "Grant consent first (`agiw-mcp consent grant`), then run agiw_readiness again.",
+            )
         return check_key(holder.get("config") or Config())
 
     def node_step() -> dict:
         return check_node(holder.get("config"))
 
-    steps = [("python", check_python), ("config", config_step), ("node", node_step), ("nisi", check_nisi),
-             ("models", models_step)]
+    steps = [
+        ("python", check_python),
+        ("config", config_step),
+        ("node", node_step),
+        ("nisi", check_nisi),
+        ("models", models_step),
+    ]
     for name, step in steps:
         try:
             row = step()
@@ -224,15 +315,20 @@ def evaluate(stop_at_first: bool = True) -> dict:
         for name, step in (("consent", check_consent), ("jev_key", key_step)):
             try:
                 jev_checks.append(step())
-            except Exception:
+            except Exception:  # noqa: BLE001 - an optional Jev check becomes a failed row, never an exception
                 jev_checks.append(_check(name, False, "Optional Jev check failed", "Check agiw_status."))
-    result["jev"] = {"status": "READY" if jev_checks and all(row["ok"] for row in jev_checks)
-                     else "NOT_READY", "checks": jev_checks}
+    result["jev"] = {
+        "status": "READY" if jev_checks and all(row["ok"] for row in jev_checks) else "NOT_READY",
+        "checks": jev_checks,
+    }
     result["checks"].extend(jev_checks)
     if failed:
         first = failed[0]
         result["missing"] = {"id": first["id"], "detail": first["detail"], "fix": first["fix"]}
-    result["next"] = ("Ready for local Nisi work. Give a task and relevant file contents to agiw_nisi_run. "
-                      "Jev pre/post checks are optional and require consent and a key." if ready else
-                      "Fix the missing prerequisite, then run agiw_readiness again. No work was started.")
+    result["next"] = (
+        "Ready for local Nisi work. Give a task and relevant file contents to agiw_nisi_run. "
+        "Jev pre/post checks are optional and require consent and a key."
+        if ready
+        else "Fix the missing prerequisite, then run agiw_readiness again. No work was started."
+    )
     return result

@@ -7,6 +7,7 @@ contain request content. Incoming lines are bounded; an oversized line is
 discarded up to its newline so the next frame stays aligned. Requests are
 serialized per process; ping and cancellation remain responsive during Nisi runs.
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -25,7 +26,7 @@ MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 # Legacy initialize handshake. Newest first. 2026-07-28 is not in this list.
 SUPPORTED_PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
-    "AGIW MCP. When the user says \"initiate online code mode\" with no task, call agiw_readiness and report READY "
+    'AGIW MCP. When the user says "initiate online code mode" with no task, call agiw_readiness and report READY '
     "or the first missing local prerequisite with its fix; start nothing else. With a task: use agiw_nisi_run "
     "with the relevant file contents and review the proposed contents yourself. Jev pre/post checks are optional "
     "and require recorded consent and a key. Jev answers are advisory, not a verdict. The agiw_consent tool "
@@ -76,11 +77,12 @@ def decode_frame(raw: bytes):
 
 def _tool_result(identifier, structured: dict, is_error: bool) -> dict:
     text = json.dumps(structured, ensure_ascii=False, indent=1)
-    return _ok(identifier, {"content": [{"type": "text", "text": text}], "structuredContent": structured,
-                            "isError": is_error})
+    return _ok(
+        identifier, {"content": [{"type": "text", "text": text}], "structuredContent": structured, "isError": is_error}
+    )
 
 
-def handle(message):
+def handle(message):  # noqa: C901 - one branch per JSON-RPC method
     """Return a response dict, or None when no response is due."""
     if isinstance(message, list):
         return _error(None, INVALID_REQUEST, "Batch requests are not supported")
@@ -110,10 +112,15 @@ def handle(message):
     if method == "initialize":
         requested = params.get("protocolVersion")
         version = requested if requested in SUPPORTED_PROTOCOLS else SUPPORTED_PROTOCOLS[0]
-        return _ok(identifier, {"protocolVersion": version,
-                                "capabilities": {"tools": {"listChanged": False}},
-                                "serverInfo": {"name": SERVER_NAME, "title": "AGIW MCP", "version": __version__},
-                                "instructions": INSTRUCTIONS})
+        return _ok(
+            identifier,
+            {
+                "protocolVersion": version,
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": SERVER_NAME, "title": "AGIW MCP", "version": __version__},
+                "instructions": INSTRUCTIONS,
+            },
+        )
     if method == "ping":
         return _ok(identifier, {})
     if method == "tools/list":
@@ -125,8 +132,7 @@ def handle(message):
         name, args = params.get("name"), params.get("arguments", {})
         if args is None:
             args = {}
-        if (set(params) - {"name", "arguments", "_meta"} or not isinstance(name, str)
-                or not isinstance(args, dict)):
+        if set(params) - {"name", "arguments", "_meta"} or not isinstance(name, str) or not isinstance(args, dict):
             return _error(identifier, INVALID_PARAMS, "Invalid params")
         if name not in TOOL_NAMES:
             return _error(identifier, INVALID_PARAMS, f"Unknown tool: {name[:64]}")
@@ -153,11 +159,13 @@ def encode(message: dict) -> bytes:
     try:
         raw = json.dumps(message, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode("ascii")
     except (TypeError, ValueError):
-        raw = json.dumps(_error(message.get("id"), INTERNAL_ERROR, "Internal error"),
-                         separators=(",", ":")).encode("ascii")
+        raw = json.dumps(_error(message.get("id"), INTERNAL_ERROR, "Internal error"), separators=(",", ":")).encode(
+            "ascii"
+        )
     if len(raw) > MAX_OUTPUT_BYTES:
-        raw = json.dumps(_error(message.get("id"), INTERNAL_ERROR, "Response too large"),
-                         separators=(",", ":")).encode("ascii")
+        raw = json.dumps(_error(message.get("id"), INTERNAL_ERROR, "Response too large"), separators=(",", ":")).encode(
+            "ascii"
+        )
     return raw + b"\n"
 
 
@@ -175,7 +183,7 @@ def read_frame(stream: BinaryIO) -> bytes | None:
     return line.rstrip(b"\r\n")
 
 
-def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
+def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:  # noqa: C901 - one loop owns reads, workers and cancellation
     stdin = stdin or sys.stdin.buffer
     stdout = stdout or sys.stdout.buffer
     events = queue.Queue(maxsize=16)
@@ -212,7 +220,7 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
     def dispatch(message):
         try:
             return handle(message)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - request boundary: logged to stderr, answered as INTERNAL_ERROR
             _diag("internal error: " + type(exc).__name__)
             identifier = message.get("id") if isinstance(message, dict) and _valid_id(message.get("id")) else None
             return _error(identifier, INTERNAL_ERROR, "Internal error")
@@ -255,16 +263,26 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
                 except (ValueError, UnicodeError, RecursionError):
                     respond(_error(None, PARSE_ERROR, "Parse error"))
                     continue
-            if (isinstance(message, dict) and message.get("jsonrpc") == "2.0"
-                    and "id" not in message and message.get("method") == "notifications/cancelled"):
+            if (
+                isinstance(message, dict)
+                and message.get("jsonrpc") == "2.0"
+                and "id" not in message
+                and message.get("method") == "notifications/cancelled"
+            ):
                 params = message.get("params")
                 identifier = params.get("requestId") if isinstance(params, dict) else None
                 if _valid_id(identifier):
                     if active and type(identifier) is type(active[0]) and identifier == active[0]:
                         active[1].set()
-                    pending = deque(item for item in pending if not (
-                        isinstance(item, dict) and type(item.get("id")) is type(identifier)
-                        and item.get("id") == identifier))
+                    pending = deque(
+                        item
+                        for item in pending
+                        if not (
+                            isinstance(item, dict)
+                            and type(item.get("id")) is type(identifier)
+                            and item.get("id") == identifier
+                        )
+                    )
                 continue
             if not from_pending and (active is not None or pending):
                 if isinstance(message, dict) and message.get("method") == "ping":
@@ -276,9 +294,13 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
                 continue
             # Only the long-running Nisi tool needs a worker. Other tools retain synchronous ordering.
             params = message.get("params") if isinstance(message, dict) else None
-            if (isinstance(message, dict) and message.get("method") == "tools/call"
-                    and _valid_id(message.get("id")) and isinstance(params, dict)
-                    and params.get("name") == "agiw_nisi_run"):
+            if (
+                isinstance(message, dict)
+                and message.get("method") == "tools/call"
+                and _valid_id(message.get("id"))
+                and isinstance(params, dict)
+                and params.get("name") == "agiw_nisi_run"
+            ):
                 cancel = threading.Event()
                 worker = threading.Thread(target=run, args=(message, cancel), name="agiw-mcp-nisi")
                 active = (message["id"], cancel, worker)

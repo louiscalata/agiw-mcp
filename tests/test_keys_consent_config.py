@@ -30,8 +30,11 @@ class KeyTests(IsolatedTestCase):
     def test_run_read_refuses_non_utf8_and_oversized_output(self):
         for raw in (b"\xff", b"x" * 4097):
             done = subprocess.CompletedProcess(["fake-keystore"], 0, stdout=raw)
-            with self.subTest(size=len(raw)), mock.patch.object(keys.subprocess, "run", return_value=done), \
-                    self.assertRaises(keys.KeyUnavailable) as ctx:
+            with (
+                self.subTest(size=len(raw)),
+                mock.patch.object(keys.subprocess, "run", return_value=done),
+                self.assertRaises(keys.KeyUnavailable) as ctx,
+            ):
                 keys._run_read(["fake-keystore"])
             self.assertEqual(str(ctx.exception), keys.KEY_UNAVAILABLE_MESSAGE)
 
@@ -88,8 +91,10 @@ class KeyTests(IsolatedTestCase):
 
     @unittest.skipIf(os.name != "posix", "uses /bin/sh fakes")
     def test_keychain_failure_is_a_fixed_message_without_output(self):
-        self.use_keychain('echo "security: SecKeychainSearchCopyNext: item not found /Users/someone" >&2\n'
-                          'echo "partial-secret-material"\nexit 44\n')
+        self.use_keychain(
+            'echo "security: SecKeychainSearchCopyNext: item not found /Users/someone" >&2\n'
+            'echo "partial-secret-material"\nexit 44\n'
+        )
         with self.assertRaises(keys.KeyUnavailable) as ctx:
             keys.read_key(load_config())
         self.assertEqual(str(ctx.exception), keys.KEY_UNAVAILABLE_MESSAGE)
@@ -121,8 +126,14 @@ class ConsentTests(IsolatedTestCase):
         info = consent.show()
         self.assertFalse(info["granted"])
         text = info["disclosure"]
-        for needle in ("https://api.typesafe.ai/v1/systemone", "12288 bytes", "Authorization header",
-                       "harm_if_wrong", "self_contradiction", "advisory, not a verdict"):
+        for needle in (
+            "https://api.typesafe.ai/v1/systemone",
+            "12288 bytes",
+            "Authorization header",
+            "harm_if_wrong",
+            "self_contradiction",
+            "advisory, not a verdict",
+        ):
             self.assertIn(needle, text)
         self.assertNotIn(str(self.tmp), text)
         self.assertTrue(info["consentFile"].endswith("consent.json"))
@@ -155,10 +166,12 @@ class ConsentTests(IsolatedTestCase):
         # Stored grants are bound to this hash (consent.consent_recorded), so any edit to DISCLOSURE, the
         # endpoint, the byte limits or the question text invalidates every grant. That must be deliberate.
         self.assertEqual(
-            consent.disclosure_sha256(), PINNED_DISCLOSURE_SHA256,
+            consent.disclosure_sha256(),
+            PINNED_DISCLOSURE_SHA256,
             "The consent disclosure changed, so every stored grant stops matching. If the change is "
             "deliberate, update PINNED_DISCLOSURE_SHA256 in this test and add a CHANGELOG line telling "
-            "users to grant consent again. If it is not, revert the edit to consent.py or questions.py.")
+            "users to grant consent again. If it is not, revert the edit to consent.py or questions.py.",
+        )
 
     def test_editing_question_text_changes_the_disclosure_hash(self):
         edited = copy.deepcopy(questions.QUESTIONS)
@@ -175,9 +188,13 @@ class ConsentTests(IsolatedTestCase):
         self.assertFalse(error)
         schema = next(tool for tool in tools.TOOLS if tool["name"] == "agiw_consent")["inputSchema"]
         self.assertEqual(schema["properties"]["action"]["enum"], ["show", "revoke"])
-        for arguments in ({"action": "grant"},
-                          {"action": "grant", "disclosure_sha256": shown["disclosureSha256"]},
-                          {"action": "GRANT"}, {"action": "allow"}, {"action": "show", "granted": True}):
+        for arguments in (
+            {"action": "grant"},
+            {"action": "grant", "disclosure_sha256": shown["disclosureSha256"]},
+            {"action": "GRANT"},
+            {"action": "allow"},
+            {"action": "show", "granted": True},
+        ):
             refused, error = tools.call_tool("agiw_consent", arguments)
             self.assertTrue(error, arguments)
             self.assertFalse(consent.consent_recorded(), arguments)
@@ -193,8 +210,13 @@ class ConfigTests(IsolatedTestCase):
     def test_config_file_parse_errors(self):
         path = self.config_dir / "config.json"
         path.parent.mkdir()
-        for raw in (b" " * (config.MAX_CONFIG_BYTES + 1), b"\xff", b"{broken", b"[]",
-                    b'{"author_model":"a","author_model":"b"}'):
+        for raw in (
+            b" " * (config.MAX_CONFIG_BYTES + 1),
+            b"\xff",
+            b"{broken",
+            b"[]",
+            b'{"author_model":"a","author_model":"b"}',
+        ):
             with self.subTest(raw=raw[:80]):
                 path.write_bytes(raw)
                 with self.assertRaises(ConfigError) as ctx:
@@ -204,8 +226,10 @@ class ConfigTests(IsolatedTestCase):
         self.assertEqual(load_config().source, "defaults")
 
     def test_config_unreadable(self):
-        with mock.patch("builtins.open", side_effect=PermissionError("private path")), \
-                self.assertRaises(ConfigError) as ctx:
+        with (
+            mock.patch("builtins.open", side_effect=PermissionError("private path")),
+            self.assertRaises(ConfigError) as ctx,
+        ):
             load_config()
         self.assertEqual(ctx.exception.code, "CONFIG_UNREADABLE")
         self.assertNotIn("private path", ctx.exception.message)
@@ -230,9 +254,16 @@ class ConfigTests(IsolatedTestCase):
     def test_environment_base_urls_keep_loopback_validation(self):
         self.write_config(model_base_url="http://127.0.0.1:1235/v1")
         for name in ("AGIW_MCP_BASE_URL", "AGIW_MCP_MODEL_BASE_URL"):
-            for value in ("http://192.0.2.10:1234/v1", "https://127.0.0.1/v1", "http://localhost:1235/v1",
-                          "http://user:pw@127.0.0.1/v1", "http://127.0.0.1/v1?x=1",
-                          "http://127.0.0.1:65536/v1", "http://[::1]:0/v1", "http://127.0.0.1/v1#x"):
+            for value in (
+                "http://192.0.2.10:1234/v1",
+                "https://127.0.0.1/v1",
+                "http://localhost:1235/v1",
+                "http://user:pw@127.0.0.1/v1",
+                "http://127.0.0.1/v1?x=1",
+                "http://127.0.0.1:65536/v1",
+                "http://[::1]:0/v1",
+                "http://127.0.0.1/v1#x",
+            ):
                 with self.subTest(name=name, value=value), mock.patch.dict(os.environ, {name: value}):
                     with self.assertRaises(ConfigError) as ctx:
                         load_config()
@@ -289,8 +320,13 @@ class ConfigTests(IsolatedTestCase):
             self.assertIs(load_config().allow_unsandboxed_nisi, True)
 
     def test_rejects_non_loopback_and_unknown_keys(self):
-        for url in ("http://192.0.2.10:1234/v1", "https://127.0.0.1/v1", "http://localhost:1234/v1",
-                    "http://user:pw@127.0.0.1/v1", "http://127.0.0.1/v1?x=1"):
+        for url in (
+            "http://192.0.2.10:1234/v1",
+            "https://127.0.0.1/v1",
+            "http://localhost:1234/v1",
+            "http://user:pw@127.0.0.1/v1",
+            "http://127.0.0.1/v1?x=1",
+        ):
             self.write_config(model_base_url=url)
             with self.assertRaises(ConfigError, msg=url):
                 load_config()
@@ -312,8 +348,10 @@ class ConfigTests(IsolatedTestCase):
         for name in ("AGIW_MCP_BASE_URL", "AGIW_MCP_MODEL_BASE_URL", "AGIW_MCP_REVIEWER_BASE_URL"):
             for base in ("http://127.0.0.1:9/v1", "http://[::1]:9/v1"):
                 for suffix in ("?", "#"):
-                    with self.subTest(name=name, base=base, suffix=suffix), \
-                            mock.patch.dict(os.environ, {name: base + suffix}):
+                    with (
+                        self.subTest(name=name, base=base, suffix=suffix),
+                        mock.patch.dict(os.environ, {name: base + suffix}),
+                    ):
                         with self.assertRaises(ConfigError) as ctx:
                             load_config()
                         self.assertEqual(ctx.exception.code, "CONFIG_INVALID")
@@ -352,12 +390,20 @@ class ConfigTests(IsolatedTestCase):
 
     def test_inherited_reviewer_base_url_is_cleared_by_test_isolation(self):
         from support import CLEARED_ENV
+
         self.assertIn("AGIW_MCP_REVIEWER_BASE_URL", CLEARED_ENV)
         self.assertNotIn("AGIW_MCP_REVIEWER_BASE_URL", os.environ)
 
     def test_reviewer_base_url_keeps_loopback_validation(self):
-        for value in ("http://192.0.2.10:1245/v1", "https://127.0.0.1/v1", "http://localhost:1245/v1",
-                      "http://user:pw@127.0.0.1/v1", "http://127.0.0.1/v1?x=1", "http://127.0.0.1:65536/v1", 5):
+        for value in (
+            "http://192.0.2.10:1245/v1",
+            "https://127.0.0.1/v1",
+            "http://localhost:1245/v1",
+            "http://user:pw@127.0.0.1/v1",
+            "http://127.0.0.1/v1?x=1",
+            "http://127.0.0.1:65536/v1",
+            5,
+        ):
             with self.subTest(value=value):
                 self.write_config(reviewer_base_url=value)
                 with self.assertRaises(ConfigError) as ctx:
@@ -384,12 +430,24 @@ class ConfigTests(IsolatedTestCase):
 
     def test_terminal_grant_accepts_only_the_phrase(self):
         from agiw_mcp import __main__ as cli
-        for answer, recorded in (("I agree", True), ("i agree", True), ('"I agree"', True), ("I agree.", True),
-                                 ("  I AGREE  ", True), ("yes", False), ("I agree to nothing", False),
-                                 ("I", False), ("", False)):
+
+        for answer, recorded in (
+            ("I agree", True),
+            ("i agree", True),
+            ('"I agree"', True),
+            ("I agree.", True),
+            ("  I AGREE  ", True),
+            ("yes", False),
+            ("I agree to nothing", False),
+            ("I", False),
+            ("", False),
+        ):
             consent.revoke()
-            with mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", return_value=answer), \
-                    mock.patch("sys.stdout"):
+            with (
+                mock.patch("sys.stdin") as stdin,
+                mock.patch("builtins.input", return_value=answer),
+                mock.patch("sys.stdout"),
+            ):
                 stdin.isatty.return_value = True
                 cli._consent_cli("grant")
             self.assertEqual(consent.consent_recorded(), recorded, repr(answer))
@@ -423,6 +481,7 @@ class NetworkGuardTests(IsolatedTestCase):
 
     def test_socket_guard_blocks_external_addresses(self):
         import socket
+
         with self.assertRaises(NetworkBlocked):
             socket.create_connection(("192.0.2.1", 443), timeout=0.1)
 

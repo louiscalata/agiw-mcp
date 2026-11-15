@@ -7,6 +7,7 @@ Usage:
   python3 scripts/stdio_handshake.py agiw-mcp
   python3 scripts/stdio_handshake.py python3 -m agiw_mcp
 """
+
 from __future__ import annotations
 
 import json
@@ -32,9 +33,16 @@ def _fail(message: str) -> None:
 def handshake(command: list[str]) -> dict:
     """Return the checked summary. Exits the process if the entry point is wrong."""
     messages = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "protocolVersion": PROTOCOL, "capabilities": {},
-            "clientInfo": {"name": "agiw-mcp-smoke", "version": "0"}}},
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": PROTOCOL,
+                "capabilities": {},
+                "clientInfo": {"name": "agiw-mcp-smoke", "version": "0"},
+            },
+        },
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
     ]
@@ -61,16 +69,23 @@ def handshake(command: list[str]) -> dict:
     initialized, listed = replies
     result = initialized.get("result") if initialized.get("id") == 1 else None
     info = result.get("serverInfo") if isinstance(result, dict) else None
-    if (not isinstance(result, dict) or result.get("protocolVersion") != PROTOCOL
-            or not isinstance(info, dict) or info.get("name") != "agiw-mcp" or not info.get("version")):
+    if (
+        not isinstance(result, dict)
+        or result.get("protocolVersion") != PROTOCOL
+        or not isinstance(info, dict)
+        or info.get("name") != "agiw-mcp"
+        or not info.get("version")
+    ):
         _fail("unexpected initialize result")
     tools = listed.get("result", {}).get("tools") if listed.get("id") == 2 else None
     names = tuple(tool.get("name") for tool in tools) if isinstance(tools, list) else ()
     if names != TOOL_NAMES:
         _fail("unexpected tools/list")
-    return {"protocolVersion": PROTOCOL,
-            "server": {"name": info["name"], "version": info["version"]},
-            "tools": list(names)}
+    return {
+        "protocolVersion": PROTOCOL,
+        "server": {"name": info["name"], "version": info["version"]},
+        "tools": list(names),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

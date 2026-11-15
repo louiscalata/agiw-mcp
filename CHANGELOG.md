@@ -26,6 +26,7 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ### Tests
 
+- Python style: `docs/python-style.md` records the convention. A new `lint` CI job pins Ruff 0.17.4 and runs `ruff check` and `ruff format --check`; the unpinned Ruff step left the `distribution` job. The rule set adds `I`, `UP`, `N`, `C90`, `BLE`, `T20`, `RUF100`, and `RUF102`, with an import-order baseline for ten files. All Python files outside the vendored bundle were formatted with `ruff format`; the AST, with docstrings normalized, is unchanged, and so is the consent disclosure hash.
 - The git-install CI job lists tools with MCP Inspector 2.14.0. It does not call Jev or a model.
 - Windows CI runs the scrub check, compile, and unit tests on Python 3.12 and Node 22. Ticket-admission tests are skipped there because admission is refused before the ticket directory is touched.
 - The trickling-server deadline test waits up to a bounded time for the client's close (EOF or reset) instead of a fixed one-second join, which failed once on a busy Windows runner. Test-only; `net.py` is unchanged. (#44)

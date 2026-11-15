@@ -312,7 +312,7 @@ python3 scripts/scrub_check.py
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v
 ```
 
-A passing test run ends with `OK`. CI also runs `python -m compileall -q src` and `ruff check src tests scripts`.
+A passing test run ends with `OK`. CI also runs `python -m compileall -q src`, `ruff check src tests scripts`, and `ruff format --check src tests scripts` (Ruff 0.17.4; see [docs/python-style.md](docs/python-style.md)).
 
 The tests do not use the network. Model and Jev calls are fakes on 127.0.0.1, test mode refuses other URLs, and a socket guard blocks anything else. Without Node 22+, a fake runner covers the Python side. Binding those fakes needs permission to bind a local port.
 

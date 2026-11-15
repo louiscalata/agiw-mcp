@@ -1,6 +1,7 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
 """Exercise the runner HTTP transport with loopback fakes and no model calls."""
+
 from __future__ import annotations
 
 import errno
@@ -48,11 +49,22 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             return
-        content = ({"findings": [], "summary": "Inspected the change."} if operation == "review" else
-                   {"candidate": {"files": [{"path": "a.py", "content": "value = 1\n"}]}, "note": "edit"})
-        payload = json.dumps({"model": body["model"], "choices": [{
-            "finish_reason": "stop", "message": {"role": "assistant", "content": json.dumps(content)},
-        }]}).encode()
+        content = (
+            {"findings": [], "summary": "Inspected the change."}
+            if operation == "review"
+            else {"candidate": {"files": [{"path": "a.py", "content": "value = 1\n"}]}, "note": "edit"}
+        )
+        payload = json.dumps(
+            {
+                "model": body["model"],
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": json.dumps(content)},
+                    }
+                ],
+            }
+        ).encode()
         if self.server.response_bytes is not None:
             payload += b" " * (self.server.response_bytes - len(payload))
         self.close_connection = True
@@ -64,7 +76,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             for offset in range(0, len(payload), 65536):
-                part = payload[offset:offset + 65536]
+                part = payload[offset : offset + 65536]
                 self.wfile.write(part)
                 self.server.bytes_sent += len(part)
             if self.server.stall:
@@ -106,15 +118,33 @@ class LoopbackTransportLimitTests(IsolatedTestCase):
         work.mkdir()
         nisi._copy_verified(nisi.VENDOR_DIR, work)
         node, _version = nisi.find_node()
-        request = {"schema": 1, "taskText": "change value", "files": [{"path": "a.py", "content": "value = 0\n"}],
-                   "allowedFiles": ["a.py"], "acceptanceCriteria": ["change value"], "assertions": [],
-                   "repairBudget": 0, "deadlineMs": deadline_ms, "endpoint": endpoint,
-                   "authorModel": "author", "reviewerModel": "reviewer", "maxOutputTokens": 1000,
-                   "language": "python", "python": sys.executable, "checkTimeoutMs": 1000}
+        request = {
+            "schema": 1,
+            "taskText": "change value",
+            "files": [{"path": "a.py", "content": "value = 0\n"}],
+            "allowedFiles": ["a.py"],
+            "acceptanceCriteria": ["change value"],
+            "assertions": [],
+            "repairBudget": 0,
+            "deadlineMs": deadline_ms,
+            "endpoint": endpoint,
+            "authorModel": "author",
+            "reviewerModel": "reviewer",
+            "maxOutputTokens": 1000,
+            "language": "python",
+            "python": sys.executable,
+            "checkTimeoutMs": 1000,
+        }
         if reviewer_endpoint is not None:
             request["reviewerEndpoint"] = reviewer_endpoint
-        done = subprocess.run([node, str(work / "runner.mjs")], input=json.dumps(request).encode(),
-                              capture_output=True, cwd=work, env=nisi._child_env(node, str(work)), timeout=10)
+        done = subprocess.run(
+            [node, str(work / "runner.mjs")],
+            input=json.dumps(request).encode(),
+            capture_output=True,
+            cwd=work,
+            env=nisi._child_env(node, str(work)),
+            timeout=10,
+        )
         self.assertIn(done.returncode, (0, 2), done.stderr.decode())
         return json.loads(done.stdout), done.returncode
 
@@ -147,19 +177,39 @@ class LoopbackTransportLimitTests(IsolatedTestCase):
         # rejects them, so the runner must too, before any request reaches the server.
         v4 = self.serve()
         port = v4.server_address[1]
-        hosts = ["2130706433", "0x7f000001", "0x7f.1", "0177.0.0.1", "127.1", "127.0.0.1.", "127.0.0.01",
-                 "\uff11\uff12\uff17.0.0.1", "127\u30020\u30020\u30021", "@127.0.0.1", "user@127.0.0.1",
-                 "user:secret@127.0.0.1", "localhost", "LOCALHOST", "localhost."]
+        hosts = [
+            "2130706433",
+            "0x7f000001",
+            "0x7f.1",
+            "0177.0.0.1",
+            "127.1",
+            "127.0.0.1.",
+            "127.0.0.01",
+            "\uff11\uff12\uff17.0.0.1",
+            "127\u30020\u30020\u30021",
+            "@127.0.0.1",
+            "user@127.0.0.1",
+            "user:secret@127.0.0.1",
+            "localhost",
+            "LOCALHOST",
+            "localhost.",
+        ]
         for host in hosts:
             with self.subTest(host=host):
                 result, code = self.run_runner(f"http://{host}:{port}/v1/chat/completions")
                 self.assertEqual(code, 2, result)
                 self.assertEqual(result["error"], "LOCAL_CHAT_DESTINATION_REFUSED", result)
-        for endpoint in (f"https://127.0.0.1:{port}/v1/chat/completions", f"http:127.0.0.1:{port}/v1/chat/completions",
-                         f"http:\\\\127.0.0.1:{port}/v1/chat/completions", f" http://127.0.0.1:{port}/v1/chat/completions",
-                         f"http://127.0.0.1:{port}/v1/chat\t/completions", f"http://127.0.0.1:{port}/v1/chat/completions\n",
-                         f"http://127.0.0.1:{port}/v1/chat/completions?", f"http://127.0.0.1:{port}/v1/chat/completions#",
-                         f"http://127.0.0.1:{port}"):
+        for endpoint in (
+            f"https://127.0.0.1:{port}/v1/chat/completions",
+            f"http:127.0.0.1:{port}/v1/chat/completions",
+            f"http:\\\\127.0.0.1:{port}/v1/chat/completions",
+            f" http://127.0.0.1:{port}/v1/chat/completions",
+            f"http://127.0.0.1:{port}/v1/chat\t/completions",
+            f"http://127.0.0.1:{port}/v1/chat/completions\n",
+            f"http://127.0.0.1:{port}/v1/chat/completions?",
+            f"http://127.0.0.1:{port}/v1/chat/completions#",
+            f"http://127.0.0.1:{port}",
+        ):
             with self.subTest(endpoint=endpoint):
                 result, code = self.run_runner(endpoint)
                 self.assertEqual(code, 2, result)
@@ -196,8 +246,9 @@ class LoopbackTransportLimitTests(IsolatedTestCase):
         server = self.serve()
         for port in ("0", "65536"):
             with self.subTest(port=port):
-                result, code = self.run_runner(self.endpoint(server),
-                                               reviewer_endpoint=f"http://127.0.0.1:{port}/v1/chat/completions")
+                result, code = self.run_runner(
+                    self.endpoint(server), reviewer_endpoint=f"http://127.0.0.1:{port}/v1/chat/completions"
+                )
                 self.assertEqual(code, 2, result)
                 self.assertEqual(result["error"], "LOCAL_CHAT_DESTINATION_REFUSED", result)
         self.assertEqual(server.calls, [])
@@ -218,8 +269,9 @@ class LoopbackTransportLimitTests(IsolatedTestCase):
                     validate_loopback_base_url(f"http://127.0.0.1:{port}/v1")
         for port in ("1", "65535", "065535"):
             with self.subTest(port=port):
-                self.assertEqual(validate_loopback_base_url(f"http://127.0.0.1:{port}/v1"),
-                                 f"http://127.0.0.1:{port}/v1")
+                self.assertEqual(
+                    validate_loopback_base_url(f"http://127.0.0.1:{port}/v1"), f"http://127.0.0.1:{port}/v1"
+                )
 
     def test_non_canonical_ipv6_loopback_spellings_are_refused(self):
         v6 = self.serve("::1")
