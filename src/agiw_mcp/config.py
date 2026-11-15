@@ -31,6 +31,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import tempfile
 from urllib.parse import urlsplit
@@ -256,7 +257,10 @@ def _validate(values: dict) -> dict:  # noqa: C901 - one check per config key
 
 def _read_file(path: Path) -> dict:
     try:
-        with open(path, "rb") as handle:
+        # O_NONBLOCK: a FIFO here must not block the server; symlinks are still followed.
+        with open(path, "rb", opener=open_nonblocking) as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise OSError("not a regular file")
             raw = handle.read(MAX_CONFIG_BYTES + 1)
     except FileNotFoundError:
         return {}
@@ -266,7 +270,7 @@ def _read_file(path: Path) -> dict:
         raise ConfigError("CONFIG_INVALID", "The config file is larger than 64 KB.")
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
-    except (UnicodeError, ValueError) as exc:
+    except (UnicodeError, ValueError, RecursionError) as exc:
         raise ConfigError("CONFIG_INVALID", "The config file is not valid JSON.") from exc
     if not isinstance(value, dict):
         raise ConfigError("CONFIG_INVALID", "The config file must contain a JSON object.")
@@ -274,6 +278,11 @@ def _read_file(path: Path) -> dict:
     if unknown:
         raise ConfigError("CONFIG_INVALID", "The config file has unknown keys: " + ", ".join(unknown[:5]) + ".")
     return value
+
+
+def open_nonblocking(path, flags):
+    """An open() opener that cannot block on a FIFO; callers then refuse anything but a regular file."""
+    return os.open(path, flags | getattr(os, "O_NONBLOCK", 0))
 
 
 def _unique_pairs(pairs):
