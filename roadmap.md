@@ -25,4 +25,4 @@ CI does not verify live TypeSafe requests or launch the supported MCP clients.
 ## Deferred work
 
 - Move private scrub definitions out of the public scrub checker without weakening detection; the current checks are kept until then.
-- Lanes L5 and L6 of [docs/design/v0.2.md](docs/design/v0.2.md), the local record of Nisi runs and the protocol `2026-07-28` gap list, are proposals only.
+- Lane L6 of [docs/design/v0.2.md](docs/design/v0.2.md), the protocol `2026-07-28` gap list, is a proposal only. Lane L5, the local record of Nisi runs, is implemented as an opt-in `nisi_activity_log` key that is off by default; design decision D3 (on or off by default) is still open.

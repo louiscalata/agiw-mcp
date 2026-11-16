@@ -21,6 +21,8 @@ variable sets it and it is not a tool argument. The environment still chooses
 which config.json is read (AGIW_MCP_CONFIG_DIR, or APPDATA, XDG_CONFIG_HOME and
 the home directory), so whoever sets the server's launch environment can select
 a file that sets it.
+nisi_activity_log (default false) turns on nisi-activity.jsonl, a local record of Nisi runs
+(hashes, codes and counts, no text). It is also file-only: no environment variable or tool argument sets it.
 check_python optionally selects an absolute interpreter path for Python syntax
 checks. It is also file-only; an unset key keeps the server's interpreter.
 The Jev endpoint is not configurable.
@@ -67,6 +69,7 @@ _KEYS = frozenset(
         "require_ticket",
         "allow_unsandboxed_nisi",
         "check_python",
+        "nisi_activity_log",
     }
 )
 _ENV = {
@@ -184,6 +187,9 @@ class Config:
     source: str = "defaults"
     # File-only syntax-check interpreter; None keeps the interpreter running this server.
     check_python: str | None = None
+    # File-only, off by default: when true, agiw_nisi_run appends one line per validated call to
+    # nisi-activity.jsonl (see activity.py). Deliberately absent from _ENV.
+    nisi_activity_log: bool = False
 
     @property
     def chat_endpoint(self) -> str:
@@ -219,6 +225,7 @@ class Config:
             "reviewer_base_url": self.reviewer_base_url,
             "allow_unsandboxed_nisi": self.allow_unsandboxed_nisi,
             "check_python": display_path(self.check_python) if self.check_python is not None else None,
+            "nisi_activity_log": self.nisi_activity_log,
             "source": self.source,
         }
 
@@ -254,7 +261,7 @@ def _validate(values: dict) -> dict:  # noqa: C901 - one check per config key
             if value is not None and value not in REASONING_EFFORTS:
                 raise ValueError("reasoning_effort must be none, low, medium or high")
             out[key] = value
-        elif key in ("require_ticket", "allow_unsandboxed_nisi"):
+        elif key in ("require_ticket", "allow_unsandboxed_nisi", "nisi_activity_log"):
             if type(value) is not bool:
                 raise ValueError(f"{key} must be true or false")
             out[key] = value
