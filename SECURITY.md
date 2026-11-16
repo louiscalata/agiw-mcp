@@ -224,7 +224,7 @@ new log, so only the current and one previous file are kept.
 `nisi-activity.jsonl` is a second, optional record. It is off by default and
 is written only when `config.json` sets `nisi_activity_log` to `true`; no
 environment variable or tool argument turns it on. When on, each
-`agiw_nisi_run` call that passes input validation adds one line: time,
+`agiw_nisi_run` call that passes input validation attempts to add one line: time,
 `outcome` (the Nisi report outcome, or the refusal code), `inputFingerprint`
 and `candidateFingerprint` (SHA-256 hex, or null), `repairAttempts` (or null),
 `sandbox` (`node-permission`, `none` or null), `ticketed` (true or false),
@@ -234,12 +234,31 @@ and typed, so the file never holds task text, file contents or paths, a ticket
 id or owner, model ids or endpoints, or a key. Caveat: `inputFingerprint` is a
 hash over the request, so someone who can read the file and can guess the exact
 inputs can confirm the guess; `inputSha256` in the Jev log has the same
-property. The file is created with mode 0600, is opened without following a
-symlink and only if it is a regular file (otherwise nothing is written), and is
-rotated when it exceeds 1 MiB: the next write renames it to
-`nisi-activity.jsonl.1`, replacing any earlier `.1`, so at most two files of
-about 1 MiB each are kept. A failed write never fails the run. The server
-never reads the file back and has no tool or command that shows it; delete the
+property. Invalid repair counts (anything other than an integer from 0 through
+1000, excluding booleans) and unrecognized sandbox labels are recorded as
+null. The file is created with mode 0600 on macOS and Linux; an existing file
+keeps its mode. The record refuses a symlinked config directory and refuses a
+symlinked, hard-linked or non-regular log, checking the opened file as well as
+the path. Existing config directory permissions are preserved, including modes
+that deny writing. On macOS and Linux, directory-relative operations anchor
+the writes to the opened config directory. On platforms without those
+operations, checks use paths and cannot prevent a same-user path replacement
+between check and use; native Windows race behavior has not been verified.
+
+The log is rotated when it exceeds 1 MiB: the next write renames it to
+`nisi-activity.jsonl.1`, replacing any earlier `.1`, so the current log and
+one previous log are retained. Rotation and append hold the same exclusive
+`nisi-activity.jsonl.lock`, and size is checked after acquiring it. Lock
+waiting is bounded; a busy or unusable lock skips the record. A process
+interrupted while holding this lock can leave it behind. Remove that lock
+manually only when no record writers are active; there is no automatic
+stale-lock recovery. A short write is rolled back to the previous file size
+before the lock is released. If rollback also fails, the writer leaves the
+lock in place so later calls skip the damaged file. Inspect and repair or
+remove that log before removing its lock, with all writers stopped. A failed
+write or lock acquisition never fails the run. A later ordinary rotation still
+discards the older backup; this is bounded retention, not a permanent run
+archive. The server has no tool or command that shows the record; delete the
 config directory or these files to remove the record. Anyone who can write the
 config directory or choose the server's launch environment can switch the
 record on or off, as for the other `config.json` keys.
