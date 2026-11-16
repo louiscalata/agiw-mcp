@@ -175,7 +175,7 @@ def request_json(url: str, *, method: str = "GET", body: dict | None = None, hea
     try:
         parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique,
                             parse_constant=_reject_constant)
-    except (UnicodeError, ValueError):
+    except (UnicodeError, ValueError, RecursionError):
         raise HttpFailure("invalid_json", status) from None
     return status, parsed
 
