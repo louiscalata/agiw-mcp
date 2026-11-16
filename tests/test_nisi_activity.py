@@ -421,7 +421,7 @@ class WriteFailureTests(FakeNodeCase):
         self.configure(nisi_activity_log=True)
         for effect in (OSError("disk"), ValueError("bad"), PermissionError("no")):
             with self.subTest(effect=type(effect).__name__):
-                with mock.patch.object(activity, "ensure_private_dir", side_effect=effect):
+                with mock.patch.object(activity, "_prepare_nisi_directory", side_effect=effect):
                     result, is_error = self.run_tool()
                 self.assertFalse(is_error, result)
                 self.assertEqual(result["outcome"], "COMPLETED")
@@ -440,7 +440,7 @@ class WriteFailureTests(FakeNodeCase):
     def test_the_helper_reports_false_instead_of_raising(self):
         for effect in (OSError("disk"), PermissionError("no"), ValueError("bad")):
             with self.subTest(effect=type(effect).__name__):
-                with mock.patch.object(activity, "ensure_private_dir", side_effect=effect):
+                with mock.patch.object(activity, "_prepare_nisi_directory", side_effect=effect):
                     self.assertFalse(activity.record_nisi(**GOOD))
 
     def test_a_failed_write_on_a_refusal_keeps_the_original_refusal(self):
