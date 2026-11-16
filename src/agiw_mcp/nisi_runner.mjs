@@ -4,7 +4,8 @@
 //
 // agiw-mcp copies this file and the hash-verified Nisi package into a private
 // temporary directory and starts it there with Node's permission model. It reads
-// one JSON request on stdin and writes one JSON result on stdout. Candidate code
+// one JSON request on stdin and writes progress records and a final result as
+// line-delimited JSON on stdout. Candidate code
 // is parsed by fixed checkers (node --check, Python's compile, JSON.parse) and
 // is never executed. The only network destinations are the configured loopback
 // chat endpoints (author, and the reviewer's if it differs), enforced here and
@@ -257,6 +258,27 @@ function loopbackFetch(url, init = {}) {
 
 const modelFetch = globalThis.agiwMcpFetch ?? loopbackFetch;
 
+// Attempt numbers are the pinned engine's zero-based binding.attempt, including repairs.
+// "finished" means the adapter settled, not that its checks passed.
+function progressEvents() {
+  let closed = false;
+  return {
+    wrap(stage, invoke) {
+      return async payload => {
+        const emit = status => {
+          if (!closed) process.stdout.write(JSON.stringify({
+            kind: 'agiw-mcp.nisi-event.v1', stage, attempt: payload.binding.attempt, status,
+          }) + '\n');
+        };
+        emit('started');
+        try { return await invoke(payload); }
+        finally { emit('finished'); }
+      };
+    },
+    close() { closed = true; },
+  };
+}
+
 async function main() {
   const request = await readRequest();
   // Exclude only the local interpreter path; all model/check inputs and options remain bound.
@@ -278,10 +300,13 @@ async function main() {
     policy: { repairBudget: request.repairBudget, totalDeadlineMs: request.deadlineMs, requiredReviewers: 1,
       requireReportStore: false },
   };
+  const progress = progressEvents();
   const adapters = {
     authorizeContext: { authorize: ({ binding }) => ({ status: 'PASS', evidence: { ...binding, reason: '' } }) },
-    author,
-    staticChecks: { check({ candidate, binding }) {
+    author: { id: author.id,
+      draft: progress.wrap('author', payload => author.draft(payload)),
+      repair: progress.wrap('author', payload => author.repair(payload)) },
+    staticChecks: { check: progress.wrap('static', ({ candidate, binding }) => {
       const findings = [];
       const statuses = {};
       let unavailable = false;
@@ -302,8 +327,8 @@ async function main() {
       }
       return { status: findings.length ? 'FAIL' : 'PASS',
         evidence: { ...binding, findings, reason: findings.length ? 'Syntax or content checks failed.' : '' } };
-    } },
-    tests: { run({ candidate, binding }) {
+    }) },
+    tests: { run: progress.wrap('tests', ({ candidate, binding }) => {
       const proposed = new Map(candidate.files.map(file => [file.path, file.content]));
       const failures = [];
       let executed = 0;
@@ -328,15 +353,18 @@ async function main() {
       });
       return { status: failures.length ? 'FAIL' : 'PASS', evidence: { ...binding, assertionsExecuted: executed,
         assertionsPassed: executed - failures.length, failures, reason: failures.length ? 'Acceptance assertions failed.' : '' } };
-    } },
-    reviewers: [reviewerWithContext],
+    }) },
+    reviewers: [{ id: reviewerWithContext.id,
+      review: progress.wrap('review', payload => reviewerWithContext.review(payload)) }],
   };
-  const report = await runWorkflow(task, { adapters });
+  let report;
+  try { report = await runWorkflow(task, { adapters }); }
+  finally { progress.close(); } // A deadline may settle the engine before an adapter settles.
   // The pinned engine converts adapter exceptions to ADAPTER_EXCEPTION. Preserve our specific
   // refusal outside that report, identifying only the configured role, never provider text.
   if (reasoningOnlyRole !== null) {
     process.stdout.write(JSON.stringify({ kind: 'agiw-mcp.nisi-run.v1',
-      error: 'MODEL_ANSWER_IN_REASONING', modelRole: reasoningOnlyRole }));
+      error: 'MODEL_ANSWER_IN_REASONING', modelRole: reasoningOnlyRole }) + '\n');
     process.exitCode = 2;
     return;
   }
@@ -347,10 +375,10 @@ async function main() {
     receipts: { author: receipts(innerAuthor), reviewer: receipts(reviewer) },
     syntax: syntaxByCandidate[report.candidateFingerprint] ?? {},
   };
-  process.stdout.write(JSON.stringify(output));
+  process.stdout.write(JSON.stringify(output) + '\n');
 }
 
 main().catch(error => {
-  process.stdout.write(JSON.stringify({ kind: 'agiw-mcp.nisi-run.v1', error: typeof error?.code === 'string' ? error.code : 'RUNNER_FAILED' }));
+  process.stdout.write(JSON.stringify({ kind: 'agiw-mcp.nisi-run.v1', error: typeof error?.code === 'string' ? error.code : 'RUNNER_FAILED' }) + '\n');
   process.exitCode = 2;
 });

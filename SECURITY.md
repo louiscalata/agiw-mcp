@@ -111,6 +111,17 @@ implemented here. The table does not cover every practice in that guide.
   the ticket directory stays, as after any admitted run. A second check on the final
   command line refuses a runner without permission flags unless the key is
   true.
+- Optional MCP progress is emitted only when `agiw_nisi_run` receives a
+  string or integer `_meta.progressToken`; booleans and other values are
+  ignored, as are tokens on other tools. The host validates runner events
+  against a closed set of fields and stage/status values, then composes the
+  notification message itself. No model text, task text, path or model id is
+  forwarded. Events are capped at 64 per run; queue-full events may be
+  dropped. Every runner stdout byte, including event and malformed lines,
+  counts toward the existing 16 MiB output limit. No progress token means no
+  progress notifications or change to the existing MCP stdout frames.
+  Progress is transient and creates no local record; no progress is sent
+  after cancellation or the final result.
 - The optional `check_python` setting selects the interpreter used for Python
   syntax checks. The path is validated as an absolute config string, then
   probed after ticket admission and before temporary-directory creation with

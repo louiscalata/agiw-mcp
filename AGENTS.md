@@ -128,6 +128,17 @@ newline-delimited JSON-RPC frames. Diagnostics go to stderr and carry no
 request content. `--version`, `readiness`, `status`, and `consent` are human
 commands. MCP clients do not send them.
 
+Only `agiw_nisi_run` may emit optional `notifications/progress`, and only for a
+string or integer `_meta.progressToken`; treat booleans as absent.
+Other tools ignore progress metadata. Preserve the one-writer rule: workers
+hand validated events to the main loop, which alone writes stdout. Keep event
+fields closed and host-composed; never forward raw runner text. Cap forwarding
+at 64 events and count all runner stdout bytes toward the existing 16 MiB
+limit. Progress starts at count 1, increases monotonically, and has no `total`.
+Include `message: "<stage> attempt <n> <status>"` only for negotiated protocol
+`2025-03-26` or newer. Do not emit progress after cancellation or the final
+result. Without a valid token, keep MCP stdout frames unchanged.
+
 Update `src/agiw_mcp/vendor/nisi/` only through AGIW Suite's bundle script,
 `bundle_nisi.py`. Do not hand-edit the package, `manifest.json`, or the pinned
 manifest hash in `nisi.py`. The server checks that hash and every file hash

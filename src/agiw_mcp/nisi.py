@@ -27,6 +27,7 @@ probed in the same interval, with isolated flags and a three-second limit.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import hashlib
 import json
 import os
@@ -51,6 +52,8 @@ MANIFEST_SHA256 = "d7cd9f31365ad47f01ccfbfaf2cf29923830abf642c60518cbeb1b9776d8c
 NISI_VERSION = "0.2.0"
 MIN_NODE = (22, 0, 0)
 RUNNER_KIND = "agiw-mcp.nisi-run.v1"
+EVENT_KIND = "agiw-mcp.nisi-event.v1"
+MAX_PROGRESS_EVENTS = 64
 OUTCOMES = frozenset({"COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "TIMED_OUT", "REPAIR_LIMIT", "NO_PROGRESS"})
 
 MAX_FILES = 64
@@ -438,7 +441,7 @@ def validate_request(args: dict) -> dict:  # noqa: C901 - one check per request 
 
 # --- bounded process -------------------------------------------------------
 
-# Set only by the stdio request worker; direct library calls have no cancellation event.
+# Set only by the stdio request worker; direct library calls have no cancellation event or progress callback.
 _CANCEL = threading.local()
 
 
@@ -457,6 +460,56 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
+class _RunnerEvents:
+    """Read allowlisted event lines without exposing runner text to the client."""
+
+    def __init__(self, callback: Callable[[dict], None], cancel: threading.Event | None) -> None:
+        self.callback = callback
+        self.cancel = cancel
+        self.pending = bytearray()
+        self.count = 0
+        self.finished = False
+
+    def feed(self, chunk: bytes, *, eof: bool = False) -> None:
+        if self.finished or self.count >= MAX_PROGRESS_EVENTS or (self.cancel is not None and self.cancel.is_set()):
+            self.pending.clear()
+            return
+        self.pending.extend(chunk)
+        while b"\n" in self.pending:
+            raw, _, rest = self.pending.partition(b"\n")
+            self.pending = rest
+            self._line(raw)
+        if eof and self.pending:
+            self._line(self.pending)
+            self.pending.clear()
+
+    def _line(self, raw: bytes) -> None:
+        if self.finished or self.count >= MAX_PROGRESS_EVENTS or (self.cancel is not None and self.cancel.is_set()):
+            return
+        try:
+            # Preserve object members until the closed event schema has checked their count.
+            # JSON arrays stay lists, so an array of pairs cannot masquerade as an object.
+            pairs = json.loads(raw.decode("utf-8"), object_pairs_hook=tuple)
+        except (UnicodeError, ValueError, RecursionError):
+            return
+        if not isinstance(pairs, tuple):
+            return
+        value = dict(pairs)
+        if value.get("kind") == RUNNER_KIND:
+            self.finished = True
+            return
+        if (
+            len(pairs) == 4
+            and set(value) == {"kind", "stage", "attempt", "status"}
+            and value["kind"] == EVENT_KIND
+            and value["stage"] in ("author", "static", "tests", "review")
+            and type(value["attempt"]) is int
+            and value["status"] in ("started", "finished")
+        ):
+            self.count += 1
+            self.callback(value)
+
+
 def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share one loop
     argv: list[str], *, data: bytes, cwd: str, env: dict, timeout: float
 ) -> tuple[int | None, bytes, str]:
@@ -470,13 +523,19 @@ def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share o
     )
     out = bytearray()
     overflow = threading.Event()
+    # Capture the worker's thread-local context here; the pipe reader has its own thread locals.
+    progress = getattr(_CANCEL, "progress", None)
+    runner_events = _RunnerEvents(progress, getattr(_CANCEL, "event", None)) if progress is not None else None
 
     def pump(stream, keep: bool, cap: int):
         size = 0
         try:
             while True:
-                chunk = stream.read(65536)
+                # read1 returns available pipe bytes instead of waiting for a full 64 KiB buffer.
+                chunk = stream.read1(65536)
                 if not chunk:
+                    if keep and runner_events is not None:
+                        runner_events.feed(b"", eof=True)
                     break
                 size += len(chunk)
                 if size > cap:
@@ -485,6 +544,8 @@ def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share o
                     break
                 if keep:
                     out.extend(chunk)
+                    if runner_events is not None:
+                        runner_events.feed(chunk)
         except (OSError, ValueError):
             pass
 
@@ -569,11 +630,17 @@ def _child_env(node: str, workdir: str) -> dict:
 
 
 def _parse_output(raw: bytes, request: dict) -> dict:
-    try:
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, ValueError):
-        raise ToolError("NISI_RUNNER_FAILED", "The Nisi runner did not return a valid result.") from None
-    if not isinstance(value, dict) or value.get("kind") != RUNNER_KIND:
+    value = None
+    for line in raw.splitlines():
+        try:
+            item = json.loads(line.decode("utf-8"))
+        except (UnicodeError, ValueError, RecursionError):
+            continue
+        if isinstance(item, dict) and item.get("kind") == RUNNER_KIND:
+            if value is not None:
+                raise ToolError("NISI_RUNNER_FAILED", "The Nisi runner returned more than one result.")
+            value = item
+    if value is None:
         raise ToolError("NISI_RUNNER_FAILED", "The Nisi runner did not return a valid result.")
     if "error" in value:
         code = value["error"] if isinstance(value["error"], str) and len(value["error"]) <= 64 else "RUNNER_FAILED"

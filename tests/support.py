@@ -145,6 +145,24 @@ def tree_snapshot(root: Path) -> dict:
     return result
 
 
+def runner_result(raw: bytes) -> dict:
+    """Validate runner NDJSON, retaining the single final result for existing assertions."""
+    records = [json.loads(line) for line in raw.splitlines()]
+    if not records or not isinstance(records[-1], dict) or records[-1].get("kind") != "agiw-mcp.nisi-run.v1":
+        raise AssertionError("runner output must end with a result")
+    for event in records[:-1]:
+        if not (
+            isinstance(event, dict)
+            and set(event) == {"kind", "stage", "attempt", "status"}
+            and event["kind"] == "agiw-mcp.nisi-event.v1"
+            and event["stage"] in ("author", "static", "tests", "review")
+            and type(event["attempt"]) is int
+            and event["status"] in ("started", "finished")
+        ):
+            raise AssertionError("runner output contains an invalid event before its result")
+    return records[-1]
+
+
 # --- fake servers ----------------------------------------------------------
 
 
