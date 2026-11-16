@@ -41,7 +41,7 @@ import tempfile
 import threading
 import time
 
-from . import tickets
+from . import activity, tickets
 from .config import Config
 from .errors import ToolError
 
@@ -673,6 +673,55 @@ def run(args: dict, config: Config, *, temp_parent: str | None = None) -> dict:
         )
     ticket = tickets.validate(args["ticket"]) if has_ticket else None
     request = validate_request({k: v for k, v in args.items() if k != "ticket"} if has_ticket else args)
+    if not config.nisi_activity_log:
+        return _admit_and_run(args, request, ticket, config, temp_parent)
+    started = time.monotonic()
+    try:
+        result = _admit_and_run(args, request, ticket, config, temp_parent)
+    except ToolError as exc:
+        _log_run(started, ticket is not None, exc.code)
+        raise
+    except Exception:
+        _log_run(started, ticket is not None, "INTERNAL_ERROR")
+        raise
+    _log_run(started, ticket is not None, result)
+    return result
+
+
+_LOG_HEX = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def _log_run(started: float, ticketed: bool, outcome) -> None:
+    """Append the nisi-activity.jsonl line for one validated call. Never raises: a record is not the run.
+
+    outcome is the summary dict of a finished run, or the refusal code. Only the report outcome, the two
+    fingerprints, the repair count and the sandbox label are copied; nothing else of the request or the
+    result is read."""
+    try:
+        fields = {"inputFingerprint": None, "candidateFingerprint": None, "repairAttempts": None, "sandbox": None}
+        if isinstance(outcome, dict):
+            code = outcome.get("outcome")
+            for key in ("inputFingerprint", "candidateFingerprint"):
+                value = outcome.get(key)
+                fields[key] = value if isinstance(value, str) and _LOG_HEX.fullmatch(value) else None
+            fields["repairAttempts"] = outcome.get("repairAttempts")
+            fields["sandbox"] = outcome.get("sandbox")
+        else:
+            code = outcome
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Z0-9_]{1,64}", code):
+            code = "REFUSED"
+        activity.record_nisi(
+            outcome=code,
+            ticketed=ticketed,
+            nisiVersion=NISI_VERSION,
+            elapsedMs=int((time.monotonic() - started) * 1000),
+            **fields,
+        )
+    except Exception:  # noqa: BLE001 - the record is best effort and must never change the tool's answer
+        pass
+
+
+def _admit_and_run(args: dict, request: dict, ticket: dict | None, config: Config, temp_parent: str | None) -> dict:
     if not config.author_model or not config.reviewer_model:
         raise ToolError(
             "MODELS_NOT_CONFIGURED",

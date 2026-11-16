@@ -220,7 +220,31 @@ created with mode 0600 on macOS and Linux; an existing log keeps its mode.
 The log is rotated when it exceeds 1 MiB: the next write renames it to
 `jev-activity.jsonl.1` (keeping its mode), replacing any earlier `.1`, and starts a
 new log, so only the current and one previous file are kept.
-Nisi runs have no per-call log; ticket admission state is
+
+`nisi-activity.jsonl` is a second, optional record. It is off by default and
+is written only when `config.json` sets `nisi_activity_log` to `true`; no
+environment variable or tool argument turns it on. When on, each
+`agiw_nisi_run` call that passes input validation adds one line: time,
+`outcome` (the Nisi report outcome, or the refusal code), `inputFingerprint`
+and `candidateFingerprint` (SHA-256 hex, or null), `repairAttempts` (or null),
+`sandbox` (`node-permission`, `none` or null), `ticketed` (true or false),
+`nisiVersion` and `elapsedMs`. A call refused before that point (unknown or
+invalid arguments, `TICKET_REQUIRED` or `TICKET_INVALID`) adds nothing. Fields are allowlisted
+and typed, so the file never holds task text, file contents or paths, a ticket
+id or owner, model ids or endpoints, or a key. Caveat: `inputFingerprint` is a
+hash over the request, so someone who can read the file and can guess the exact
+inputs can confirm the guess; `inputSha256` in the Jev log has the same
+property. The file is created with mode 0600, is opened without following a
+symlink and only if it is a regular file (otherwise nothing is written), and is
+rotated when it exceeds 1 MiB: the next write renames it to
+`nisi-activity.jsonl.1`, replacing any earlier `.1`, so at most two files of
+about 1 MiB each are kept. A failed write never fails the run. The server
+never reads the file back and has no tool or command that shows it; delete the
+config directory or these files to remove the record. Anyone who can write the
+config directory or choose the server's launch environment can switch the
+record on or off, as for the other `config.json` keys.
+
+Ticket admission state is
 stored separately. Each scope lock record also holds, in plain text, the canonical scope, the
 ticket id and the ticket owner text, inside the mode 0700 ticket state directory; refusals do not
 repeat them. A scope lock that is not a regular file, is larger than 16 KiB, or does not parse is
