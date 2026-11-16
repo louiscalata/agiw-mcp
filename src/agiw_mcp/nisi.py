@@ -704,8 +704,10 @@ def _log_run(started: float, ticketed: bool, outcome) -> None:
             for key in ("inputFingerprint", "candidateFingerprint"):
                 value = outcome.get(key)
                 fields[key] = value if isinstance(value, str) and _LOG_HEX.fullmatch(value) else None
-            fields["repairAttempts"] = outcome.get("repairAttempts")
-            fields["sandbox"] = outcome.get("sandbox")
+            repairs = outcome.get("repairAttempts")
+            fields["repairAttempts"] = repairs if type(repairs) is int and 0 <= repairs <= 1000 else None
+            sandbox = outcome.get("sandbox")
+            fields["sandbox"] = sandbox if isinstance(sandbox, str) and sandbox in ("node-permission", "none") else None
         else:
             code = outcome
         if not isinstance(code, str) or not re.fullmatch(r"[A-Z0-9_]{1,64}", code):
