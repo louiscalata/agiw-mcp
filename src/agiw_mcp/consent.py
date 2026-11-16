@@ -11,8 +11,10 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
+import stat
 
-from .config import config_dir, display_path, write_private_json
+from .config import config_dir, display_path, open_nonblocking, write_private_json
 from .errors import ToolError
 from .questions import QUESTIONS
 
@@ -74,7 +76,9 @@ def _path():
 
 def _read() -> dict | None:
     try:
-        with open(_path(), "rb") as handle:
+        with open(_path(), "rb", opener=open_nonblocking) as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                return None
             raw = handle.read(16385)
     except OSError:
         return None
@@ -82,7 +86,7 @@ def _read() -> dict | None:
         return None
     try:
         value = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, ValueError):
+    except (UnicodeError, ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
 
