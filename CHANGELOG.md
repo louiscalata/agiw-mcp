@@ -6,6 +6,11 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ## [Unreleased]
 
+### Added
+
+- Optional `check_python` key in `config.json`: an absolute path to the Python interpreter that checks the syntax of Python candidates. Unset keeps the interpreter that runs agiw-mcp. The key is read only from `config.json`, is not a tool argument, and is refused as unknown by a build from before this change. After ticket admission and before the temporary directory is created, the run probes the interpreter with fixed `-I -S -B` flags and a 3 second limit and accepts only a plain `X.Y.Z` version. A failed probe refuses with `CHECK_PYTHON_UNAVAILABLE`, whose message does not contain the path, and releases an admitted ticket. `pythonCheckerVersion` in the result is the selected interpreter's version. `agiw_status` reports `checkPython`, and `agiw_readiness` adds a `syntax_python` check after `nisi` only when the key is set. The server enforces no minimum version for the selected interpreter. (#53)
+- Optional progress notifications for `agiw_nisi_run`. A string or integer `_meta.progressToken` on the call requests them; a boolean or other value counts as absent, and other tools ignore the token. The server sends `notifications/progress` for the `author`, `static`, `tests` and `review` stages, each `started` and `finished`, with an increasing `progress` count from 1 and no `total`. At most 64 events are forwarded, and an event is dropped if the internal queue is full. The `message` (`<stage> attempt <n> <status>`) is sent only when the negotiated protocol is `2025-03-26` or newer. No progress is sent after cancellation or the result. A call without a valid token produces the same stdout frames as before. (#56)
+
 ### Changed
 
 - **Behavior change.** `agiw_nisi_run` refuses with `NODE_SANDBOX_UNAVAILABLE` when `node --help` lists neither `--permission` nor `--experimental-permission`. Previously the run proceeded without a file-access limit and reported sandbox `"none"`. Use a Node.js that lists the flag, or set `"allow_unsandboxed_nisi": true` in `config.json`. The key is read only from `config.json`. A build from before this change refuses a `config.json` that contains it. (#48)
@@ -19,6 +24,7 @@ until a release is assigned. Entries under Unreleased are not a new release.
 - The host runner checks the raw author and reviewer endpoint text before parsing it and refuses spellings that configuration rejects, such as `127.1`, `0x7f.1` or userinfo, with `LOCAL_CHAT_DESTINATION_REFUSED`. (#42)
 - The host runner refuses author and reviewer endpoint ports outside 1-65535 with `LOCAL_CHAT_DESTINATION_REFUSED`, matching configuration. (#43)
 - Ticket admission refuses a scope lock that is not a regular file, is larger than 16 KiB, or is nested too deeply to parse (`TICKET_REGISTRY_CORRUPT`), instead of blocking or failing with an internal error. (#46)
+- A Jev or model-server reply that is nested too deeply to parse is refused as an invalid response instead of failing with an internal error; Jev reports `JEV_BAD_RESPONSE` and still logs the call. A deeply nested `config.json` is `CONFIG_INVALID`. A `config.json` that is not a regular file is `CONFIG_UNREADABLE` and no longer blocks the server. A deeply nested or non-regular `consent.json` reads as consent not recorded. (#52)
 
 ### Documentation
 
@@ -30,6 +36,8 @@ until a release is assigned. Entries under Unreleased are not a new release.
 - Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
 - The README lists the legacy `initialize` versions the server accepts: `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
 - `docs/design/v0.2.md` proposes the next scope of work as lanes L1 to L6, with owner decisions D1 to D5. (#47)
+- The `agiw_readiness` description returned by `tools/list` now says the Node check needs a Node.js 22+ whose `node --help` lists a permission flag, or `allow_unsandboxed_nisi` set in `config.json`, and lists the checks in the order readiness runs them. SECURITY.md states that `jev-activity.jsonl` is rotated to `.1` above 1 MiB, so only the current file and one previous file are kept. (#55)
+- README and SECURITY.md describe `check_python` (#53) and progress notifications (#56).
 
 ### Tests
 
@@ -38,6 +46,7 @@ until a release is assigned. Entries under Unreleased are not a new release.
 - Windows CI runs the scrub check, compile, and unit tests on Python 3.12 and Node 22. Ticket-admission tests are skipped there because admission is refused before the ticket directory is touched.
 - The trickling-server deadline test waits up to a bounded time for the client's close (EOF or reset) instead of a fixed one-second join, which failed once on a busy Windows runner. Test-only; `net.py` is unchanged. (#44)
 - A test pins the SHA-256 of the consent disclosure, so an edit that would invalidate stored grants fails a test first. (#48)
+- New test modules cover the reader limits (#52), `check_python` (#53), the readiness description and the Jev log rotation (#55), and Nisi progress (#56).
 
 ### Packaging
 
