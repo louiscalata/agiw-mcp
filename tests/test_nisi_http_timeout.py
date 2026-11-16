@@ -10,7 +10,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unittest
 
-from support import IsolatedTestCase, node_available
+from support import IsolatedTestCase, node_available, runner_result
 
 from agiw_mcp import nisi
 
@@ -105,7 +105,7 @@ class LoopbackTimeoutTests(IsolatedTestCase):
             timeout=40,
         )
         self.assertIn(done.returncode, (0, 2), done.stderr.decode())
-        return json.loads(done.stdout), done.returncode
+        return runner_result(done.stdout), done.returncode
 
     def test_headers_withheld_past_the_configured_timeout_are_a_timeout(self):
         # Headers arrive 1.2s after the 0.4s deadline. Undici used to fail this as an

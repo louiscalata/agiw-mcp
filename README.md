@@ -57,6 +57,22 @@ After the local checks pass, readiness reports Jev on its own as `jev.status`: `
 
 One server process handles one tool call at a time. During a Nisi run, ping and cancellation still get a response.
 
+For `agiw_nisi_run`, a client may include `_meta.progressToken` as a string or
+integer to receive optional progress notifications; booleans and other types
+are ignored. Other tools ignore progress tokens. Notifications report
+validated host-runner adapter events for the `author`, `static`, `tests` and
+`review` stages, with `started` or `finished` status. `finished` means the
+adapter call settled; it does not mean the stage passed. The attempt number is
+the engine's zero-based attempt. The notification's `progress` is a
+monotonically increasing event count starting at 1; `total` is omitted. At
+most 64 events are forwarded, and events may be dropped if the internal queue
+is full. No progress is sent after cancellation or the result. The optional
+`message` is `<stage> attempt <n> <status>` for negotiated protocol
+`2025-03-26` or newer and is omitted for older protocols. There is no heartbeat
+between events. Notifications do not establish that a client displays them or
+extends its request timeout. Without a valid progress token, MCP stdout frames
+remain unchanged.
+
 ## What works, and what does not
 
 **Works**

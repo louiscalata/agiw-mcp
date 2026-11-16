@@ -13,7 +13,7 @@ import sys
 import threading
 import unittest
 
-from support import IsolatedTestCase, node_available
+from support import IsolatedTestCase, node_available, runner_result
 
 from agiw_mcp import nisi
 from agiw_mcp.config import validate_loopback_base_url
@@ -146,7 +146,7 @@ class LoopbackTransportLimitTests(IsolatedTestCase):
             timeout=10,
         )
         self.assertIn(done.returncode, (0, 2), done.stderr.decode())
-        return json.loads(done.stdout), done.returncode
+        return runner_result(done.stdout), done.returncode
 
     def test_ipv6_loopback_completes_for_author_and_reviewer(self):
         server = self.serve("::1")

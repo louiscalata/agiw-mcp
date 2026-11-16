@@ -82,7 +82,7 @@ def _tool_result(identifier, structured: dict, is_error: bool) -> dict:
     )
 
 
-def handle(message):  # noqa: C901 - one branch per JSON-RPC method
+def handle(message: object) -> dict | None:  # noqa: C901 - one branch per JSON-RPC method
     """Return a response dict, or None when no response is due."""
     if isinstance(message, list):
         return _error(None, INVALID_REQUEST, "Batch requests are not supported")
@@ -183,6 +183,20 @@ def read_frame(stream: BinaryIO) -> bytes | None:
     return line.rstrip(b"\r\n")
 
 
+def _progress_token(message: dict) -> str | int | None:
+    params = message.get("params")
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    token = meta.get("progressToken") if isinstance(meta, dict) else None
+    return token if type(token) in (str, int) else None
+
+
+def _progress_notification(token: str | int, event: dict, count: int, version: str | None) -> dict:
+    params = {"progressToken": token, "progress": count}
+    if version is not None and version >= "2025-03-26":
+        params["message"] = f"{event['stage']} attempt {event['attempt']} {event['status']}"
+    return {"jsonrpc": "2.0", "method": "notifications/progress", "params": params}
+
+
 def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:  # noqa: C901 - one loop owns reads, workers and cancellation
     stdin = stdin or sys.stdin.buffer
     stdout = stdout or sys.stdout.buffer
@@ -190,8 +204,10 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
     stopped = threading.Event()
     pending = deque()
     active = None
+    negotiated_version = None
+    progress_count = 0
 
-    def post(event):
+    def post(event: tuple) -> None:
         while not stopped.is_set():
             try:
                 events.put(event, timeout=0.1)
@@ -199,7 +215,7 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
             except queue.Full:
                 continue
 
-    def read():
+    def read() -> None:
         while not stopped.is_set():
             try:
                 frame = read_frame(stdin)
@@ -212,24 +228,40 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
             if frame is None:
                 return
 
-    def respond(reply):
+    def respond(reply: dict | None) -> None:
         if reply is not None:
             stdout.write(encode(reply))
             stdout.flush()
 
-    def dispatch(message):
+    def dispatch(message: object) -> dict | None:
+        nonlocal negotiated_version
         try:
-            return handle(message)
+            reply = handle(message)
+            if isinstance(message, dict) and message.get("method") == "initialize" and reply and "result" in reply:
+                negotiated_version = reply["result"]["protocolVersion"]
+            return reply
         except Exception as exc:  # noqa: BLE001 - request boundary: logged to stderr, answered as INTERNAL_ERROR
             _diag("internal error: " + type(exc).__name__)
             identifier = message.get("id") if isinstance(message, dict) and _valid_id(message.get("id")) else None
             return _error(identifier, INTERNAL_ERROR, "Internal error")
 
-    def run(message, cancel):
+    def run(message: dict, cancel: threading.Event) -> None:
+        def progress(event: dict) -> None:
+            if stopped.is_set() or cancel.is_set():
+                return
+            try:
+                events.put_nowait(("progress", (cancel, event)))
+            except queue.Full:
+                pass  # Progress is lossy; never delay the runner or terminal result.
+
         nisi._CANCEL.event = cancel
+        if _progress_token(message) is not None:
+            nisi._CANCEL.progress = progress
         try:
             post(("done", dispatch(message)))
         finally:
+            if hasattr(nisi._CANCEL, "progress"):
+                del nisi._CANCEL.progress
             del nisi._CANCEL.event
 
     reader = threading.Thread(target=read, name="agiw-mcp-stdin", daemon=True)
@@ -244,6 +276,17 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
                 message = pending.popleft()
                 from_pending = True
             else:
+                if kind == "progress":
+                    cancel, event = value
+                    if (
+                        active is not None
+                        and cancel is active[1]
+                        and not cancel.is_set()
+                        and progress_count < nisi.MAX_PROGRESS_EVENTS
+                    ):
+                        progress_count += 1
+                        respond(_progress_notification(active[3], event, progress_count, negotiated_version))
+                    continue
                 if kind == "done":
                     if not active[1].is_set():
                         respond(value)
@@ -303,7 +346,8 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
             ):
                 cancel = threading.Event()
                 worker = threading.Thread(target=run, args=(message, cancel), name="agiw-mcp-nisi")
-                active = (message["id"], cancel, worker)
+                active = (message["id"], cancel, worker, _progress_token(message))
+                progress_count = 0
                 worker.start()
             else:
                 respond(dispatch(message))

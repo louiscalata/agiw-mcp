@@ -11,7 +11,7 @@ import threading
 import unittest
 from unittest import mock
 
-from support import IsolatedTestCase, node_available
+from support import IsolatedTestCase, node_available, runner_result
 from agiw_mcp import __main__ as cli, config, consent, jev, net, nisi, readiness, tickets, tools
 from agiw_mcp.errors import ToolError
 
@@ -266,7 +266,11 @@ globalThis.agiwMcpFetch = async (_url, init) => {
     usage: {prompt_tokens: 10, completion_tokens: 5, total_tokens: 15}}));
 };
 const write = process.stdout.write.bind(process.stdout);
-process.stdout.write = raw => write(JSON.stringify({...JSON.parse(raw), wireHashes: hashes}));
+process.stdout.write = raw => {
+  const record = JSON.parse(raw);
+  return write(JSON.stringify(record.kind === 'agiw-mcp.nisi-run.v1'
+    ? {...record, wireHashes: hashes} : record) + '\\n');
+};
 await import(RUNNER);
 """.replace("CANDIDATE", json.dumps(candidate)).replace("RUNNER", json.dumps((work / "runner.mjs").as_uri()))
         done = subprocess.run(
@@ -278,7 +282,7 @@ await import(RUNNER);
             timeout=10,
         )
         self.assertEqual(done.returncode, 0, done.stderr.decode())
-        return json.loads(done.stdout)
+        return runner_result(done.stdout)
 
     def test_python_compiler_rejects_module_control_statements(self):
         for candidate in ("return 1\n", "break\n", "nonlocal missing\n"):
