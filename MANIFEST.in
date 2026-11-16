@@ -1,3 +1,6 @@
 # Distutils adds tests/test*.py and leaves out the helpers those tests import.
 recursive-include tests *.py
+include tests/test_support/rpc_serve_golden/cases.json
+include tests/test_support/rpc_serve_golden/README.md
+include tests/test_support/jev_analyse_golden/cases.json
 recursive-include scripts *.py
