@@ -120,8 +120,10 @@ class NisiProgressTests(IsolatedTestCase):
 
     def test_event_bytes_count_against_stdout_cap(self):
         events = []
+        # The child builds the repeated output itself: 500 events inline exceed the Windows command-line limit.
+        script = f"import os; os.write(1, {line(EVENT)!r} * 500 + {line(RESULT)!r})"
         with mock.patch.object(nisi, "STDOUT_CAP", 1024):
-            _, raw, state = self.child(line(EVENT) * 500 + line(RESULT), callback=events.append)
+            _, raw, state = self.child(b"", callback=events.append, script=script)
         self.assertEqual(state, "overflow")
         self.assertLessEqual(len(raw), 1024)
 

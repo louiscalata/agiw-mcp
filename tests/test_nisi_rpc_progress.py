@@ -10,6 +10,7 @@ import queue
 import subprocess
 import sys
 import threading
+import unittest
 
 from support import ROOT, IsolatedTestCase, subprocess_env, write_fake_node
 
@@ -58,6 +59,8 @@ class _StdioSession:
             stream.close()
 
 
+# Windows cannot run the shebang fake: the installed Node would run the real runner there instead.
+@unittest.skipIf(os.name != "posix", "fake runner uses a shebang script")
 class NisiRpcProgressTests(IsolatedTestCase):
     def session(self):
         marker = self.tmp / "finish-run"
