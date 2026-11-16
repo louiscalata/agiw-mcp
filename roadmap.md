@@ -13,6 +13,7 @@ The latest release is `v0.1.0`. Main contains later fixes and still reports vers
 - [x] Select the Python interpreter for the syntax check with the optional `check_python` key (lane L3 of [docs/design/v0.2.md](docs/design/v0.2.md), #53).
 - [x] State the readiness permission-flag check in the `agiw_readiness` description and the Jev log rotation in SECURITY.md (#55).
 - [x] Send optional progress notifications for `agiw_nisi_run` (lane L4 of [docs/design/v0.2.md](docs/design/v0.2.md), #56).
+- [x] Harden the opt-in Nisi activity record against concurrent rotation, short writes, hard links and unsafe config directory handling; preserve a safe line for malformed nullable report metadata.
 - [ ] Resolve the two remaining public-review findings: commit metadata in published history, and the private scrub definitions listed under Deferred work. Both need an owner decision.
 - [ ] Assign a version and publish a reviewed release containing the changes on main.
 
