@@ -15,6 +15,7 @@ until a release is assigned. Entries under Unreleased are not a new release.
 
 ### Changed
 
+- Vendored public Nisi from 0.2.0 to 0.3.2: the 22 files of the published `nisi-0.3.2.tgz` release asset, unchanged (asset SHA-256 `940752a97c79ce7e8f23ddf103b3405d8fb8397e1471f582c1df8377599a710a`, matching the release `SHA256SUMS`; tag `v0.3.2` -> commit `40f23fee7fa545544a1e5fcbcc95687c8bb97069`). `nisi.py` now pins manifest SHA-256 `53940edc65d014c163bf5e34c8243835cd3c068f860e25b5e814a20fe6aafb87`. The host runner still imports `runWorkflow` and the local-chat adapters; those export signatures are unchanged, and requests that omit `reasoningEffort` stay byte-identical to v0.2.1. Living docs, `NOTICE`, `PROVENANCE.md`, and the version-pin tests follow the new bundle. The `suite-compat` job still checks this pin against AGIW Suite `main`, so this change should land after Suite vendors the same 0.3.2 bytes.
 - **Behavior change.** `agiw_nisi_run` refuses with `NODE_SANDBOX_UNAVAILABLE` when `node --help` lists neither `--permission` nor `--experimental-permission`. Previously the run proceeded without a file-access limit and reported sandbox `"none"`. Use a Node.js that lists the flag, or set `"allow_unsandboxed_nisi": true` in `config.json`. The key is read only from `config.json`. A build from before this change refuses a `config.json` that contains it. (#48)
 - `agiw_status` reports `node.sandbox`. `agiw_readiness` fails the node check when Node has no permission model and `allow_unsandboxed_nisi` is false, or when `node --help` fails. (#48)
 

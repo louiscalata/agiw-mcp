@@ -6,7 +6,7 @@
 Usage: PYTHONPATH=src python3 scripts/suite_compat.py /path/to/agiw-suite
 
 AGIW Suite does not start agiw-mcp. The shared pieces are the vendored Nisi
-v0.2.0 tree, the LICENSE bytes, and the Jev model and endpoint pin.
+tree, the LICENSE bytes, and the Jev model and endpoint pin.
 """
 
 from __future__ import annotations

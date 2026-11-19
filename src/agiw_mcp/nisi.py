@@ -1,6 +1,6 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
-"""Run one vendored Nisi v0.2.0 workflow on caller-supplied file contents.
+"""Run one vendored Nisi v0.3.2 workflow on caller-supplied file contents.
 
 The caller passes file contents, not paths. agiw-mcp never reads or writes the
 user's project. Each run gets a private temporary directory (mode 0700) that
@@ -48,8 +48,8 @@ from .errors import ToolError
 PACKAGE_DIR = Path(__file__).resolve().parent
 VENDOR_DIR = PACKAGE_DIR / "vendor" / "nisi"
 RUNNER = PACKAGE_DIR / "nisi_runner.mjs"
-MANIFEST_SHA256 = "d7cd9f31365ad47f01ccfbfaf2cf29923830abf642c60518cbeb1b9776d8cd23"
-NISI_VERSION = "0.2.0"
+MANIFEST_SHA256 = "53940edc65d014c163bf5e34c8243835cd3c068f860e25b5e814a20fe6aafb87"
+NISI_VERSION = "0.3.2"
 MIN_NODE = (22, 0, 0)
 RUNNER_KIND = "agiw-mcp.nisi-run.v1"
 EVENT_KIND = "agiw-mcp.nisi-event.v1"

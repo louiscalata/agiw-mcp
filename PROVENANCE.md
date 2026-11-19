@@ -1,43 +1,49 @@
 # Provenance
 
 Every file in this repository was written for AGIW MCP, except the files listed
-below. Those were copied byte-for-byte from the public AGIW Suite repository
+below. `LICENSE` was copied byte-for-byte from the public AGIW Suite repository
 (https://github.com/louiscalata/agiw-suite), branch `edition-parity`, at commit
-`5d52621` (2026-10-19). That branch is no longer published. The same files are
+`5d52621` (2026-10-19). That branch is no longer published. That `LICENSE` is
 byte-identical in AGIW Suite's `v1.0.0` tag (commit
-`8bb7de71491e23c4d1409a807549fbb5b2c15b1e`) and on its `main` branch, so you can
-check them there. Each is licensed under Apache-2.0 (SPDX: `Apache-2.0`) by the
-same copyright holder, Louis Calata.
+`8bb7de71491e23c4d1409a807549fbb5b2c15b1e`) and on its `main` branch. Each
+listed file is licensed under Apache-2.0 (SPDX: `Apache-2.0`) by the same
+copyright holder, Louis Calata.
 
-The vendored Nisi files are themselves the public Nisi v0.2.0 release
-(https://github.com/louiscalata/nisi/releases/tag/v0.2.0, source commit
-`41fb6aeb67713011abc40b1434f5a939a5704aa4`), as pinned by
+The vendored Nisi files are themselves the public Nisi v0.3.2 release
+(https://github.com/louiscalata/nisi/releases/tag/v0.3.2, source commit
+`40f23fee7fa545544a1e5fcbcc95687c8bb97069`), as pinned by
 `src/agiw_mcp/vendor/nisi/manifest.json`. agiw-mcp checks the SHA-256 of that
-manifest (`d7cd9f31365ad47f01ccfbfaf2cf29923830abf642c60518cbeb1b9776d8cd23`)
-and of every listed file before each run.
+manifest (`53940edc65d014c163bf5e34c8243835cd3c068f860e25b5e814a20fe6aafb87`)
+and of every listed file before each run. Those Nisi files are kept in sync
+with AGIW Suite's `vendor/nisi` tree. They are not the Nisi tree from AGIW
+Suite's `v1.0.0` tag.
 
-| File in this repository | Source path in agiw-suite (`v1.0.0`) | SPDX | SHA-256 |
+| File in this repository | Source path in agiw-suite | SPDX | SHA-256 |
 |---|---|---|---|
 | `LICENSE` | `LICENSE` | Apache-2.0 | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
-| `src/agiw_mcp/vendor/nisi/manifest.json` | `vendor/nisi/manifest.json` | Apache-2.0 | `d7cd9f31365ad47f01ccfbfaf2cf29923830abf642c60518cbeb1b9776d8cd23` |
+| `src/agiw_mcp/vendor/nisi/manifest.json` | `vendor/nisi/manifest.json` | Apache-2.0 | `53940edc65d014c163bf5e34c8243835cd3c068f860e25b5e814a20fe6aafb87` |
 | `src/agiw_mcp/vendor/nisi/package/LICENSE` | `vendor/nisi/package/LICENSE` | Apache-2.0 | `c95bae1d1ce0235ecccd3560b772ec1efb97f348a79f0fbe0a634f0c2ccefe2c` |
-| `src/agiw_mcp/vendor/nisi/package/README.md` | `vendor/nisi/package/README.md` | Apache-2.0 | `9db0e88aca6f53847e05bc0f19165309eda0e185b691a1a500a957b4da3fa62e` |
+| `src/agiw_mcp/vendor/nisi/package/README.md` | `vendor/nisi/package/README.md` | Apache-2.0 | `cb7d43b0125588d770b947d2c29f269c314816d4abacd548fa9f14d832cf9e47` |
 | `src/agiw_mcp/vendor/nisi/package/adapters/apple-foundation-models.mjs` | `vendor/nisi/package/adapters/apple-foundation-models.mjs` | Apache-2.0 | `311f4898c31b4e0693093361fc19c344086c1f24946909fe134c14d37e25d080` |
-| `src/agiw_mcp/vendor/nisi/package/adapters/local-chat.mjs` | `vendor/nisi/package/adapters/local-chat.mjs` | Apache-2.0 | `75dc8b128883fb14e524ceb05b4696e53406c2c8038ec4340b42f0ca471fe043` |
-| `src/agiw_mcp/vendor/nisi/package/bin/nisi.mjs` | `vendor/nisi/package/bin/nisi.mjs` | Apache-2.0 | `56d758021043684a0d6ff35c443a57dea5de3e11828fff3afa61cc476479198f` |
+| `src/agiw_mcp/vendor/nisi/package/adapters/jev-advisor.mjs` | `vendor/nisi/package/adapters/jev-advisor.mjs` | Apache-2.0 | `7b5e53f44d0f4d76b2ceaac6313cf8cb5ec07d1760c4f28fce6ee4f25aae322a` |
+| `src/agiw_mcp/vendor/nisi/package/adapters/jev-client.mjs` | `vendor/nisi/package/adapters/jev-client.mjs` | Apache-2.0 | `3d2be17d5f2e0735c20a199e2bd3a568bf8e6fada7617a0e1fd7a7553363e1a1` |
+| `src/agiw_mcp/vendor/nisi/package/adapters/local-chat.mjs` | `vendor/nisi/package/adapters/local-chat.mjs` | Apache-2.0 | `94a3a8f7af19705ad8e0a4c59f28d4a43ddaa7a331d466253fba0c95c4d8010c` |
+| `src/agiw_mcp/vendor/nisi/package/bin/nisi.mjs` | `vendor/nisi/package/bin/nisi.mjs` | Apache-2.0 | `ea422946ecb9a810918d378a05414504e807dd697a1b0e5eafd27f79b326507f` |
 | `src/agiw_mcp/vendor/nisi/package/canonical/canonical-json-v1.mjs` | `vendor/nisi/package/canonical/canonical-json-v1.mjs` | Apache-2.0 | `d1049a26d2bea0d14e959c0af22af15b975345091c5fa5360e8bd685637f8e59` |
-| `src/agiw_mcp/vendor/nisi/package/examples/local-model-workflow.mjs` | `vendor/nisi/package/examples/local-model-workflow.mjs` | Apache-2.0 | `10bebdef922bb63c3716baa107cd037d3de6432b93a2e058e22151578738a2c1` |
-| `src/agiw_mcp/vendor/nisi/package/examples/workflow.mjs` | `vendor/nisi/package/examples/workflow.mjs` | Apache-2.0 | `0d365578db02cb9aeda0aaa500aef61cad506e1dfdd0ce36a76235781d9795fd` |
+| `src/agiw_mcp/vendor/nisi/package/examples/local-model-workflow.mjs` | `vendor/nisi/package/examples/local-model-workflow.mjs` | Apache-2.0 | `06ee225c2ea943391d557ca6a281e5dee7e87087cc387a88bd45c5c8985146a6` |
+| `src/agiw_mcp/vendor/nisi/package/examples/workflow.mjs` | `vendor/nisi/package/examples/workflow.mjs` | Apache-2.0 | `dafeb258a4c326d89deaf4ba4724803a0cb548ffe69ac9ea4d514009df617921` |
 | `src/agiw_mcp/vendor/nisi/package/gate/afm-content-executor.mjs` | `vendor/nisi/package/gate/afm-content-executor.mjs` | Apache-2.0 | `6a4c23a3495a00dbf98e9ff5c68a9008f421d6fe225a3768b6863d4e12324ed6` |
-| `src/agiw_mcp/vendor/nisi/package/gate/content-consent.mjs` | `vendor/nisi/package/gate/content-consent.mjs` | Apache-2.0 | `a735eb35cb1373b3f3744dc7b3caa8b24ebbf394babba53d4f722136c72a0820` |
-| `src/agiw_mcp/vendor/nisi/package/history/run-journal-store-v1.mjs` | `vendor/nisi/package/history/run-journal-store-v1.mjs` | Apache-2.0 | `772bee640e246d14da4bfe6d6d52e62f750436aa5c4caf1457eeef703f058eaf` |
-| `src/agiw_mcp/vendor/nisi/package/history/run-journal-v1.mjs` | `vendor/nisi/package/history/run-journal-v1.mjs` | Apache-2.0 | `ab51ddd2ca2e3e1dcc24560991b1ffd703d015f584882613731a58814bc5db3b` |
+| `src/agiw_mcp/vendor/nisi/package/gate/content-consent.mjs` | `vendor/nisi/package/gate/content-consent.mjs` | Apache-2.0 | `1a3cfaf69ca9e056d4a4a48466bbaca97cc272fdf2d24c9214c889c0eb4962cf` |
+| `src/agiw_mcp/vendor/nisi/package/history/run-journal-anchor-v1.mjs` | `vendor/nisi/package/history/run-journal-anchor-v1.mjs` | Apache-2.0 | `60a2211986fc12d7f13cefacc45ebb13039913cd0fe642654e4ad422f6f5e8d4` |
+| `src/agiw_mcp/vendor/nisi/package/history/run-journal-store-v1.mjs` | `vendor/nisi/package/history/run-journal-store-v1.mjs` | Apache-2.0 | `de96cdcce9fc304a495615060af89447a28f48918ce8ceced39d20d6ec92063f` |
+| `src/agiw_mcp/vendor/nisi/package/history/run-journal-v1.mjs` | `vendor/nisi/package/history/run-journal-v1.mjs` | Apache-2.0 | `8ba3a5ffd05c58b8981d03f1d6087d5c3cd90d5fd08c214ab9d0cd21304c46c0` |
+| `src/agiw_mcp/vendor/nisi/package/history/validate-data.mjs` | `vendor/nisi/package/history/validate-data.mjs` | Apache-2.0 | `005007ccc3dc54389019b09e64ff8bc5abede3c550f534215990864f256b357e` |
 | `src/agiw_mcp/vendor/nisi/package/index.mjs` | `vendor/nisi/package/index.mjs` | Apache-2.0 | `066c90d65209854cd6aeb838924ce28dca90d7dc75d0cd533d17fbba8e1c3db7` |
-| `src/agiw_mcp/vendor/nisi/package/package.json` | `vendor/nisi/package/package.json` | Apache-2.0 | `f00a8fa85371b4f3146bf8f2ad2d02ad6fd4974a1a5e0080d6294af03d9205c4` |
+| `src/agiw_mcp/vendor/nisi/package/package.json` | `vendor/nisi/package/package.json` | Apache-2.0 | `d2ffcc35d0f2fdf44d707d8ef0646a0b63b7de6123ef5fa4465eb96af80d3f16` |
 | `src/agiw_mcp/vendor/nisi/package/policy/file-access.mjs` | `vendor/nisi/package/policy/file-access.mjs` | Apache-2.0 | `92f9f60220e1869ad0d6571ae2b5a8ddc9259b2463c4cf617d4cecee6eacc1d3` |
 | `src/agiw_mcp/vendor/nisi/package/serialization/canonical-json-v1.mjs` | `vendor/nisi/package/serialization/canonical-json-v1.mjs` | Apache-2.0 | `1e5eb6222da2c7baae3cd45a5077ccc1e8ae25b5bc184646d9e55170dec53625` |
-| `src/agiw_mcp/vendor/nisi/package/workflow/contracts.mjs` | `vendor/nisi/package/workflow/contracts.mjs` | Apache-2.0 | `c28a3ee3db6e9a936cd58fca8b8ee3f2744ca25c259e2ea278b3b09cdbb73d82` |
-| `src/agiw_mcp/vendor/nisi/package/workflow/engine.mjs` | `vendor/nisi/package/workflow/engine.mjs` | Apache-2.0 | `c67c63baeadc725a8487af7108b01d3a38dd50e64ff35f1be66471c81e5f979b` |
+| `src/agiw_mcp/vendor/nisi/package/workflow/contracts.mjs` | `vendor/nisi/package/workflow/contracts.mjs` | Apache-2.0 | `e5a8eb5f33975756b15a17fa9875959a7999db2f683dbfa90d001605948bc928` |
+| `src/agiw_mcp/vendor/nisi/package/workflow/engine.mjs` | `vendor/nisi/package/workflow/engine.mjs` | Apache-2.0 | `ce4879c99e379d70ef6bde41d1bfd65b83cede30470e9382fe4238bb107e803f` |
 
 ## Referenced, not copied
 

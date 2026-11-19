@@ -30,7 +30,7 @@ GOOD = {
     "repairAttempts": 0,
     "sandbox": "node-permission",
     "ticketed": False,
-    "nisiVersion": "0.2.0",
+    "nisiVersion": "0.3.2",
     "elapsedMs": 12,
 }
 STAMP = "2026-01-02T03:04:05Z"

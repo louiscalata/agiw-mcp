@@ -263,7 +263,7 @@ class ReadinessTests(IsolatedTestCase):
         rendered = str(result)
         self.assertNotIn(key, rendered)
         self.assertTrue(result["prerequisites"]["consent"])
-        self.assertEqual(result["nisi"]["version"], "0.2.0")
+        self.assertEqual(result["nisi"]["version"], "0.3.2")
         home = os.path.expanduser("~")
         if str(self.tmp).startswith(home):
             self.assertNotIn(home + os.sep, result["configDir"])
