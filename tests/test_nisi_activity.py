@@ -265,7 +265,12 @@ class LoggedRunTests(FakeNodeCase):
         self.assertEqual(stat.S_IMODE(self.log.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.config_dir.stat().st_mode), 0o700)
         names = sorted(os.listdir(self.config_dir))
-        self.assertEqual(names, ["config.json", activity.NISI_LOG_FILE])
+        lock = [activity.NISI_LOG_FILE + ".lock"] if activity.fcntl is not None else []
+        self.assertEqual(names, ["config.json", activity.NISI_LOG_FILE, *lock])
+        # The persistent flock file is empty and private; it never holds run data.
+        for name in lock:
+            self.assertEqual((self.config_dir / name).read_bytes(), b"")
+            self.assertEqual(stat.S_IMODE((self.config_dir / name).stat().st_mode), 0o600)
 
     def test_the_log_has_no_request_text_paths_models_or_secrets(self):
         self.configure(nisi_activity_log=True, model_base_url="http://127.0.0.1:45871/v1")
@@ -542,7 +547,8 @@ class RotationTests(IsolatedTestCase):
         self.assertEqual(self.previous.read_bytes(), second)
         self.assertEqual(
             sorted(path.name for path in self.config_dir.iterdir()),
-            [activity.NISI_LOG_FILE, activity.NISI_LOG_FILE + ".1"],
+            [activity.NISI_LOG_FILE, activity.NISI_LOG_FILE + ".1"]
+            + ([activity.NISI_LOG_FILE + ".lock"] if activity.fcntl is not None else []),
         )
 
     def test_total_size_stays_bounded_over_many_runs(self):

@@ -248,15 +248,25 @@ between check and use; native Windows race behavior has not been verified.
 The log is rotated when it exceeds 1 MiB: the next write renames it to
 `nisi-activity.jsonl.1`, replacing any earlier `.1`, so the current log and
 one previous log are retained. Rotation and append hold the same exclusive
-`nisi-activity.jsonl.lock`, and size is checked after acquiring it. Lock
-waiting is bounded; a busy or unusable lock skips the record. A process
-interrupted while holding this lock can leave it behind. Remove that lock
-manually only when no record writers are active; there is no automatic
-stale-lock recovery. A short write is rolled back to the previous file size
-before the lock is released. If rollback also fails, the writer leaves the
-lock in place so later calls skip the damaged file. Inspect and repair or
-remove that log before removing its lock, with all writers stopped. A failed
-write or lock acquisition never fails the run. A later ordinary rotation still
+lock, and size is checked after acquiring it. On macOS and Linux the lock is
+`flock` on `nisi-activity.jsonl.lock`, opened relative to the config directory
+without following a symlink and only as a single-link regular file. That file
+is empty, mode 0600, and never removed; the kernel releases the lock when its
+holder closes it or exits, so a killed writer does not block later records.
+Without `fcntl` (native Windows), the lock is an exclusive-create
+`nisi-activity.jsonl.lock` that the writer removes after use; a process
+interrupted while holding it can leave it behind, and it must be removed
+manually only when no record writers are active. Lock waiting is bounded
+(about 100 ms); a busy or unusable lock skips the record. A short write is
+rolled back to the previous file size. If rollback also fails, the writer
+creates the empty marker `nisi-activity.jsonl.damaged` (mode 0600) and every
+later call skips the record while it exists. To recover, stop record writers,
+inspect and repair or remove `nisi-activity.jsonl`, then delete the marker. If
+the fallback cannot create the marker, it leaves its lock file in place
+instead. Each skipped record (busy lock, damaged marker, or write failure)
+prints one line to stderr, `agiw-mcp: nisi activity record skipped (locked)`,
+`(damaged)` or `(error)`, with no request content, paths or fingerprints. A
+failed write or lock acquisition never fails the run. A later ordinary rotation still
 discards the older backup; this is bounded retention, not a permanent run
 archive. The server has no tool or command that shows the record; delete the
 config directory or these files to remove the record. Anyone who can write the

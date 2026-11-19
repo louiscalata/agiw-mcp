@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr
 import errno
+import io
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,9 @@ from agiw_mcp import activity, nisi
 from agiw_mcp.config import Config
 from agiw_mcp.errors import ToolError
 
+FLOCK = unittest.skipIf(activity.fcntl is None, "flock is POSIX only")
+LINE = "agiw-mcp: nisi activity record skipped ({})\n"
+
 
 class RecordHardeningTests(IsolatedTestCase):
     def setUp(self):
@@ -32,9 +36,51 @@ class RecordHardeningTests(IsolatedTestCase):
         self.log = self.config_dir / activity.NISI_LOG_FILE
         self.previous = self.config_dir / (activity.NISI_LOG_FILE + ".1")
         self.lock = self.config_dir / (activity.NISI_LOG_FILE + ".lock")
+        self.marker = self.config_dir / (activity.NISI_LOG_FILE + activity.NISI_DAMAGED_SUFFIX)
 
     def entries(self):
         return [json.loads(line) for line in self.log.read_bytes().splitlines()]
+
+    def assert_lock_free(self):
+        """No writer holds the lock: the flock file stays and can be locked; the fallback file is gone."""
+        if activity.fcntl is None:
+            self.assertFalse(self.lock.exists())
+            return
+        fd = os.open(self.lock, os.O_WRONLY)
+        try:
+            activity.fcntl.flock(fd, activity.fcntl.LOCK_EX | activity.fcntl.LOCK_NB)
+        finally:
+            os.close(fd)
+
+    @contextmanager
+    def stderr(self):
+        captured = io.StringIO()
+        with redirect_stderr(captured):
+            yield captured
+
+    @contextmanager
+    def held_by_another_process(self):
+        script = (
+            "import fcntl, os, sys\n"
+            "fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT, 0o600)\n"
+            "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+            "print('held', flush=True)\n"
+            "sys.stdin.read()\n"
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c", script, str(self.lock)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            self.assertEqual(process.stdout.readline(), b"held\n")
+            yield
+        finally:
+            process.stdin.close()
+            process.wait(timeout=15)
+            process.stdout.close()
+            process.stderr.close()
 
     @contextmanager
     def log_close_error(self):
@@ -108,24 +154,106 @@ class RecordHardeningTests(IsolatedTestCase):
         self.assertTrue(activity.record_nisi(**GOOD))
         self.assertEqual(len(self.entries()), 2)
 
-    def test_failed_rollback_keeps_the_lock_and_refuses_further_appends(self):
+    def test_failed_rollback_writes_the_marker_and_refuses_further_appends(self):
         self.assertTrue(activity.record_nisi(**GOOD))
         real_write = os.write
         with (
+            self.stderr() as err,
             mock.patch.object(activity.os, "write", side_effect=lambda fd, line: real_write(fd, line[:10])),
             mock.patch.object(activity.os, "ftruncate", side_effect=OSError(errno.EIO, "rollback failed")),
         ):
             self.assertFalse(activity.record_nisi(**GOOD))
+        self.assertEqual(err.getvalue(), LINE.format("damaged"))
         damaged = self.log.read_bytes()
-        self.assertTrue(self.lock.exists())
-        self.assertFalse(activity.record_nisi(**GOOD))
+        self.assertTrue(self.marker.is_file())
+        self.assertEqual(self.marker.read_bytes(), b"")
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE(self.marker.stat().st_mode), 0o600)
+        self.assert_lock_free()
+        with self.stderr():
+            self.assertFalse(activity.record_nisi(**GOOD))
         self.assertEqual(self.log.read_bytes(), damaged)
         self.log.unlink()
-        self.lock.unlink()
+        self.marker.unlink()
         self.assertTrue(activity.record_nisi(**GOOD))
         self.assertEqual(len(self.entries()), 1)
 
-    def test_failed_rollback_and_close_keep_the_lock_and_refuse_without_changing_bytes(self):
+    def test_failed_rollback_in_the_fallback_also_writes_the_marker_and_removes_the_lock(self):
+        self.assertTrue(activity.record_nisi(**GOOD))
+        self.lock.unlink(missing_ok=True)
+        real_write = os.write
+        with (
+            mock.patch.object(activity, "fcntl", None),
+            self.stderr(),
+        ):
+            with (
+                mock.patch.object(activity.os, "write", side_effect=lambda fd, line: real_write(fd, line[:10])),
+                mock.patch.object(activity.os, "ftruncate", side_effect=OSError(errno.EIO, "rollback failed")),
+            ):
+                self.assertFalse(activity.record_nisi(**GOOD))
+            self.assertTrue(self.marker.exists())
+            self.assertFalse(self.lock.exists())
+            self.assertFalse(activity.record_nisi(**GOOD))
+            self.assertFalse(self.lock.exists())
+
+    def test_fallback_keeps_its_lock_when_the_marker_cannot_be_written(self):
+        self.assertTrue(activity.record_nisi(**GOOD))
+        self.lock.unlink(missing_ok=True)
+        real_write, real_open = os.write, os.open
+
+        def no_marker(path, *args, **kwargs):
+            if Path(path).name == self.marker.name:
+                raise OSError(errno.EACCES, "denied")
+            return real_open(path, *args, **kwargs)
+
+        with (
+            mock.patch.object(activity, "fcntl", None),
+            self.stderr() as err,
+            mock.patch.object(activity.os, "open", side_effect=no_marker),
+            mock.patch.object(activity.os, "write", side_effect=lambda fd, line: real_write(fd, line[:10])),
+            mock.patch.object(activity.os, "ftruncate", side_effect=OSError(errno.EIO, "rollback failed")),
+        ):
+            self.assertFalse(activity.record_nisi(**GOOD))
+        self.assertEqual(err.getvalue(), LINE.format("damaged"))
+        self.assertFalse(self.marker.exists())
+        self.assertTrue(self.lock.exists())
+
+    def test_a_damaged_marker_blocks_writes_and_prints_one_line(self):
+        self.assertTrue(activity.record_nisi(**GOOD))
+        before = self.log.read_bytes()
+        self.marker.write_bytes(b"")
+        with self.stderr() as err:
+            self.assertFalse(activity.record_nisi(**GOOD))
+        self.assertEqual(err.getvalue(), LINE.format("damaged"))
+        self.assertEqual(self.log.read_bytes(), before)
+        self.assert_lock_free()
+        self.marker.unlink()
+        with self.stderr() as err:
+            self.assertTrue(activity.record_nisi(**GOOD))
+        self.assertEqual(err.getvalue(), "")
+
+    @POSIX
+    def test_a_symlinked_marker_still_blocks_and_is_not_followed(self):
+        victim = self.tmp / "victim"
+        victim.write_bytes(b"keep")
+        self.marker.symlink_to(victim)
+        with self.stderr() as err:
+            self.assertFalse(activity.record_nisi(**GOOD))
+        self.assertEqual(err.getvalue(), LINE.format("damaged"))
+        self.assertTrue(self.marker.is_symlink())
+        self.assertEqual(victim.read_bytes(), b"keep")
+        self.assertFalse(self.log.exists())
+
+    def test_diagnostic_never_carries_request_content(self):
+        fields = {**GOOD, "inputFingerprint": "b" * 64, "outcome": "SECRET_OUTCOME"}
+        with self.stderr() as err, mock.patch.object(activity.os, "write", side_effect=OSError(errno.ENOSPC, "x")):
+            self.assertFalse(activity.record_nisi(**fields))
+        self.assertEqual(err.getvalue(), LINE.format("error"))
+        self.assertNotIn("b" * 64, err.getvalue())
+        self.assertNotIn("SECRET", err.getvalue())
+        self.assertNotIn(str(self.tmp), err.getvalue())
+
+    def test_failed_rollback_and_close_write_the_marker_and_refuse_without_changing_bytes(self):
         self.assertTrue(activity.record_nisi(**GOOD))
         before = self.log.read_bytes()
         real_write = os.write
@@ -145,12 +273,11 @@ class RecordHardeningTests(IsolatedTestCase):
         self.assertEqual(len(partial), 1)
         self.assertEqual(len(damaged) - len(before), 10)
         self.assertEqual(damaged, before + partial[0])
-        self.assertTrue(self.lock.exists())
-        lock_before = self.lock.read_bytes()
+        self.assertTrue(self.marker.exists())
+        self.assert_lock_free()
         self.assertFalse(activity.record_nisi(**GOOD))
         self.assertEqual(self.log.read_bytes(), damaged)
-        self.assertTrue(self.lock.exists())
-        self.assertEqual(self.lock.read_bytes(), lock_before)
+        self.assertTrue(self.marker.exists())
 
     def test_successful_rollback_and_close_error_release_the_lock(self):
         self.assertTrue(activity.record_nisi(**GOOD))
@@ -162,7 +289,8 @@ class RecordHardeningTests(IsolatedTestCase):
         ):
             self.assertFalse(activity.record_nisi(**GOOD))
         self.assertEqual(self.log.read_bytes(), before)
-        self.assertFalse(self.lock.exists())
+        self.assert_lock_free()
+        self.assertFalse(self.marker.exists())
         self.assertTrue(activity.record_nisi(**GOOD))
         self.assertEqual(len(self.entries()), 2)
 
@@ -173,7 +301,7 @@ class RecordHardeningTests(IsolatedTestCase):
             self.assertFalse(activity.record_nisi(**GOOD))
         self.assertTrue(self.log.read_bytes().startswith(before))
         self.assertEqual(len(self.entries()), 2)
-        self.assertFalse(self.lock.exists())
+        self.assert_lock_free()
         self.assertTrue(activity.record_nisi(**GOOD))
         self.assertEqual(len(self.entries()), 3)
 
@@ -186,7 +314,8 @@ class RecordHardeningTests(IsolatedTestCase):
         ):
             self.assertFalse(activity.record_nisi(**GOOD))
         self.assertEqual(self.log.read_bytes(), before)
-        self.assertFalse(self.lock.exists())
+        self.assert_lock_free()
+        self.assertFalse(self.marker.exists())
         self.assertTrue(activity.record_nisi(**GOOD))
         self.assertEqual(len(self.entries()), 2)
 
@@ -201,7 +330,7 @@ class RecordHardeningTests(IsolatedTestCase):
         ):
             self.assertIs(nisi.run(dict(ARGS), Config(nisi_activity_log=True)), result)
         self.assertEqual(len(self.log.read_bytes()), 10)
-        self.assertTrue(self.lock.exists())
+        self.assertTrue(self.marker.exists())
 
     def test_failed_rollback_and_close_preserve_the_run_error(self):
         error = ToolError("REFUSED", "Run refused.")
@@ -216,7 +345,7 @@ class RecordHardeningTests(IsolatedTestCase):
                 nisi.run(dict(ARGS), Config(nisi_activity_log=True))
             self.assertIs(caught.exception, error)
         self.assertEqual(len(self.log.read_bytes()), 10)
-        self.assertTrue(self.lock.exists())
+        self.assertTrue(self.marker.exists())
 
     @POSIX
     def test_hardlinked_log_is_refused_before_rotation(self):
@@ -293,15 +422,72 @@ class RecordHardeningTests(IsolatedTestCase):
         self.assertTrue(changed)
         self.assertEqual(list(target.iterdir()), [])
 
-    def test_busy_lock_has_a_bounded_wait_and_preserves_contents(self):
+    def test_fallback_busy_lock_has_a_bounded_wait_and_preserves_contents(self):
         self.lock.write_bytes(b"existing owner")
         started = time.monotonic()
-        self.assertFalse(activity.record_nisi(**GOOD))
+        with mock.patch.object(activity, "fcntl", None), self.stderr() as err:
+            self.assertFalse(activity.record_nisi(**GOOD))
         self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(err.getvalue(), LINE.format("locked"))
         self.assertEqual(self.lock.read_bytes(), b"existing owner")
         self.assertFalse(self.log.exists())
 
-    def test_a_transient_lock_conflict_is_retried(self):
+    @FLOCK
+    def test_a_stale_lock_file_does_not_block_the_next_record(self):
+        self.lock.write_bytes(b"left by a killed writer")
+        os.chmod(self.lock, 0o600)
+        with self.stderr() as err:
+            self.assertTrue(activity.record_nisi(**GOOD))
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(self.lock.read_bytes(), b"left by a killed writer")
+        self.assertEqual(len(self.entries()), 1)
+
+    @FLOCK
+    def test_a_writer_killed_while_holding_the_lock_does_not_wedge_the_record(self):
+        script = (
+            "import fcntl, os, signal, sys\n"
+            "fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT, 0o600)\n"
+            "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+            "os.kill(os.getpid(), signal.SIGKILL)\n"
+        )
+        process = subprocess.run([sys.executable, "-I", "-B", "-c", script, str(self.lock)], timeout=15)
+        self.assertNotEqual(process.returncode, 0)
+        self.assertTrue(self.lock.exists())
+        self.assertTrue(activity.record_nisi(**GOOD))
+        self.assertEqual(len(self.entries()), 1)
+
+    @FLOCK
+    def test_a_lock_held_by_another_process_is_respected_with_a_bounded_wait(self):
+        with self.held_by_another_process():
+            started = time.monotonic()
+            with self.stderr() as err:
+                self.assertFalse(activity.record_nisi(**GOOD))
+            self.assertLess(time.monotonic() - started, 1)
+            self.assertEqual(err.getvalue(), LINE.format("locked"))
+            self.assertFalse(self.log.exists())
+        self.assertTrue(activity.record_nisi(**GOOD))
+        self.assertEqual(len(self.entries()), 1)
+
+    @FLOCK
+    def test_a_transient_flock_conflict_is_retried(self):
+        real = activity.fcntl
+        calls = []
+
+        def conflict_once(fd, operation):
+            calls.append(operation)
+            if len(calls) == 1:
+                raise BlockingIOError(errno.EWOULDBLOCK, "busy")
+            return real.flock(fd, operation)
+
+        fake = SimpleNamespace(flock=conflict_once, LOCK_EX=real.LOCK_EX, LOCK_NB=real.LOCK_NB)
+        with mock.patch.object(activity, "fcntl", fake), mock.patch.object(activity.time, "sleep") as pause:
+            self.assertTrue(activity.record_nisi(**GOOD))
+        self.assertEqual(calls, [real.LOCK_EX | real.LOCK_NB] * 2)
+        pause.assert_called_once()
+        self.assert_lock_free()
+        self.assertEqual(len(self.entries()), 1)
+
+    def test_a_transient_lock_conflict_is_retried_in_the_fallback(self):
         real_open = os.open
         conflicted = False
 
@@ -313,6 +499,7 @@ class RecordHardeningTests(IsolatedTestCase):
             return real_open(path, *args, **kwargs)
 
         with (
+            mock.patch.object(activity, "fcntl", None),
             mock.patch.object(activity.os, "open", side_effect=conflict_once),
             mock.patch.object(activity.time, "sleep") as pause,
         ):
@@ -322,13 +509,71 @@ class RecordHardeningTests(IsolatedTestCase):
         self.assertFalse(self.lock.exists())
         self.assertEqual(len(self.entries()), 1)
 
+    def lock_close_error(self):
+        real_close, real_open = os.close, os.open
+        lock_fds = set()
+
+        def tracked_open(path, *args, **kwargs):
+            fd = real_open(path, *args, **kwargs)
+            if Path(path).name == self.lock.name:
+                lock_fds.add(fd)
+            return fd
+
+        def close_then_error(fd):
+            real_close(fd)
+            if fd in lock_fds:
+                lock_fds.discard(fd)
+                raise OSError(errno.EIO, "lock close failed")
+
+        return (
+            mock.patch.object(activity.os, "open", side_effect=tracked_open),
+            mock.patch.object(activity.os, "close", side_effect=close_then_error),
+        )
+
+    def test_fallback_lock_close_and_unlink_failures_do_not_wedge(self):
+        real_unlink = os.unlink
+        tracked_open, failing_close = self.lock_close_error()
+        with mock.patch.object(activity, "fcntl", None), tracked_open, failing_close:
+            self.assertTrue(activity.record_nisi(**GOOD))
+            self.assertFalse(self.lock.exists())
+            with mock.patch.object(activity.os, "unlink", side_effect=OSError(errno.EIO, "unlink failed")):
+                self.assertTrue(activity.record_nisi(**GOOD))
+            self.assertTrue(self.lock.exists())
+            # A lock name left by a failed unlink is reported, bounded, and recovered by removing it.
+            with self.stderr() as err:
+                self.assertFalse(activity.record_nisi(**GOOD))
+            self.assertEqual(err.getvalue(), LINE.format("locked"))
+            real_unlink(self.lock)
+            self.assertTrue(activity.record_nisi(**GOOD))
+        self.assertEqual(len(self.entries()), 3)
+
+    @FLOCK
+    def test_flock_close_failure_still_releases_the_lock(self):
+        tracked_open, failing_close = self.lock_close_error()
+        with tracked_open, failing_close:
+            self.assertTrue(activity.record_nisi(**GOOD))
+        self.assert_lock_free()
+        self.assertTrue(activity.record_nisi(**GOOD))
+        self.assertEqual(len(self.entries()), 2)
+
+    @POSIX
+    def test_a_hardlinked_lock_is_refused(self):
+        victim = self.tmp / "victim"
+        victim.write_bytes(b"keep")
+        os.link(victim, self.lock)
+        with self.stderr() as err:
+            self.assertFalse(activity.record_nisi(**GOOD))
+        self.assertEqual(err.getvalue(), LINE.format("error"))
+        self.assertEqual(victim.read_bytes(), b"keep")
+        self.assertFalse(self.log.exists())
+
     def test_lock_is_released_after_a_rotation_failure(self):
         old = b"x" * (activity.MAX_LOG_BYTES + 1)
         self.log.write_bytes(old)
         with mock.patch.object(activity.os, "replace", side_effect=OSError(errno.EIO, "rename failed")):
             self.assertFalse(activity.record_nisi(**GOOD))
         self.assertEqual(self.log.read_bytes(), old)
-        self.assertFalse(self.lock.exists())
+        self.assert_lock_free()
         self.assertTrue(activity.record_nisi(**GOOD))
         self.assertEqual(self.previous.read_bytes(), old)
 
@@ -389,7 +634,7 @@ class RecordHardeningTests(IsolatedTestCase):
         self.assertTrue(changed)
         self.assertEqual(list(target.iterdir()), [])
         self.assertEqual(len((moved / activity.NISI_LOG_FILE).read_bytes().splitlines()), 1)
-        self.assertFalse((moved / self.lock.name).exists())
+        self.assertEqual((moved / self.lock.name).exists(), activity.fcntl is not None)
 
     @POSIX
     def test_symlink_swap_between_stat_and_open_does_not_write_the_target(self):
@@ -420,7 +665,7 @@ class RecordHardeningTests(IsolatedTestCase):
     def test_lock_is_released_after_a_write_failure(self):
         with mock.patch.object(activity.os, "write", side_effect=OSError(errno.ENOSPC, "no room")):
             self.assertFalse(activity.record_nisi(**GOOD))
-        self.assertFalse(self.lock.exists())
+        self.assert_lock_free()
         self.assertTrue(activity.record_nisi(**GOOD))
 
     @POSIX
