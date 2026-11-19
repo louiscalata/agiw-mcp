@@ -1,6 +1,6 @@
 # Roadmap
 
-The latest release is `v0.1.0`. Main contains later fixes and still reports version `0.1.0`; see [CHANGELOG.md](CHANGELOG.md).
+The latest release is `v0.1.0`. Main contains later fixes and still reports version `0.1.0`; see [CHANGELOG.md](CHANGELOG.md) and the [current-main release draft](docs/release-notes/current-main-draft.md), whose version is TBD.
 
 ## Next release
 

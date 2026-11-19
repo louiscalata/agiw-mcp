@@ -8,6 +8,8 @@ AGIW MCP is a local [Model Context Protocol](https://modelcontextprotocol.io) se
 
 **Status:** the `v0.1.0` tag and current main both report version `0.1.0`. The server needs Python 3.10 or newer. The optional syntax-check interpreter is configured separately. Node.js 22 or newer when a Nisi run needs it. CI runs on macOS, Linux, and Windows. Apache-2.0. Not published to PyPI.
 
+Unreleased changes since the tag are summarized in [CHANGELOG.md](CHANGELOG.md). The release-note draft for current main is [docs/release-notes/current-main-draft.md](docs/release-notes/current-main-draft.md); its version is TBD.
+
 ## Quick start
 
 ```bash
