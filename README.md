@@ -43,6 +43,8 @@ With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize requ
 
 The legacy `initialize` handshake accepts `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
 
+The server is dual-era. A request whose `params._meta` carries any `io.modelcontextprotocol/` key is answered as protocol `2026-07-28` without an `initialize` first: `server/discover`, `tools/list` and `tools/call` add `resultType`, the cache hints `ttlMs` and `cacheScope` where the revision requires them, and `_meta` server identity. A request with that `_meta` must name `2026-07-28` and carry a `clientCapabilities` object. `initialize` itself is always legacy, and a request without that `_meta` is answered exactly as before.
+
 Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are in [Client setup](#client-setup).
 
 ## How it works
@@ -68,16 +70,18 @@ monotonically increasing event count starting at 1; `total` is omitted. At
 most 64 events are forwarded, and events may be dropped if the internal queue
 is full. No progress is sent after cancellation or the result. The optional
 `message` is `<stage> attempt <n> <status>` for negotiated protocol
-`2025-03-26` or newer and is omitted for older protocols. There is no heartbeat
-between events. Notifications do not establish that a client displays them or
-extends its request timeout. Without a valid progress token, MCP stdout frames
-remain unchanged.
+`2025-03-26` or newer and is omitted for older protocols. A modern request
+takes the version from that request's `_meta`, so `message` is present without
+an `initialize`. There is no heartbeat between events. Notifications do not
+establish that a client displays them or extends its request timeout. Without
+a valid progress token, MCP stdout frames remain unchanged.
 
 ## What works, and what does not
 
 **Works**
 
 - The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
+- Dual-era MCP. Requests whose `params._meta` carries an `io.modelcontextprotocol/` key are answered statelessly as protocol `2026-07-28`, and every legacy frame is unchanged.
 - An optional `check_python` interpreter for Nisi's Python syntax check.
 - Vendored Nisi v0.2.0, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text. An optional, default-off record of Nisi runs (`nisi_activity_log`) stores hashes, codes, time and counts.
@@ -88,7 +92,7 @@ remain unchanged.
 - PyPI. Install from git or from a checkout.
 - Ticket admission on Windows. CI runs the other unit tests there. Admission is still refused (`TICKET_UNSUPPORTED_PLATFORM`) before the ticket directory is touched. Runs without a ticket still work there unless `require_ticket` is true.
 - Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
-- OpenCode protocol `2026-07-28` is not implemented. OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is the one this server answers.
+- OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is still the handshake it uses; the modern path is tested in process, not with a real client.
 - A live request to TypeSafe is not part of the tests. `agiw_jev_pre` and `agiw_jev_post` refuse until consent is recorded and a key is available. CI uses a local fake for the success path.
 - Granting consent is not an OS user-presence check. Any same-user process that can write the config directory can change `consent.json`. This limit also applies to `v0.1.0`, whose README overstates the consent guarantee.
 - `COMPLETED` does not apply files. You do that yourself, after reading the proposal.
@@ -258,7 +262,7 @@ droid mcp add agiw agiw-mcp
 }
 ```
 
-**OpenCode.** Current config puts each server under `mcp.servers` in `opencode.json` or `opencode.jsonc`. `type` is `local` and `command` is an array. `codemode` defaults to true; `false` leaves these six tools on the native tool list. `protocol` defaults to `legacy`, which uses `initialize` through `2025-11-25`.
+**OpenCode.** Current config puts each server under `mcp.servers` in `opencode.json` or `opencode.jsonc`. `type` is `local` and `command` is an array. `codemode` defaults to true; `false` leaves these six tools on the native tool list. `protocol` defaults to `legacy`, which uses `initialize` through `2025-11-25`. A modern client that sends `params._meta` with an `io.modelcontextprotocol/` key is answered as protocol `2026-07-28` by the same process.
 
 ```bash
 opencode mcp add agiw -- agiw-mcp
