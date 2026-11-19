@@ -1,6 +1,6 @@
 // Copyright 2026 Louis Calata
 // SPDX-License-Identifier: Apache-2.0
-// agiw-mcp host for exactly one Nisi v0.2.0 workflow run.
+// agiw-mcp host for exactly one Nisi v0.3.2 workflow run.
 //
 // agiw-mcp copies this file and the hash-verified Nisi package into a private
 // temporary directory and starts it there with Node's permission model. It reads

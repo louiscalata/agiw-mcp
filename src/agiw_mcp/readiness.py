@@ -133,7 +133,7 @@ def check_nisi() -> dict:
             "nisi",
             False,
             f"Vendored Nisi failed verification ({exc.code})",
-            "Reinstall agiw-mcp so the vendored Nisi v0.2.0 files match their manifest.",
+            "Reinstall agiw-mcp so the vendored Nisi v0.3.2 files match their manifest.",
         )
     return _check("nisi", True, f"Nisi {info['version']}: {info['files']} files match the pinned manifest")
 
