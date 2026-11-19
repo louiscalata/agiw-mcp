@@ -17,7 +17,7 @@ pipx install .
 agiw-mcp --version
 ```
 
-`agiw-mcp --version` prints `agiw-mcp 0.1.0`.
+`agiw-mcp --version` prints `agiw-mcp 0.1.0`. `agiw-mcp status` prints the full status JSON (versions, configuration and which prerequisites pass); the `agiw_status` tool returns the same report over MCP.
 
 The same checkout can be tried without installing it, or installed with uv:
 
@@ -137,7 +137,7 @@ When configured, `reasoning_effort` (`none`, `low`, `medium` or `high`) is sent 
 }
 ```
 
-Other keys: `reviewer_base_url` (optional, same loopback rule; otherwise the reviewer uses `model_base_url`), `keychain_service` (default `agiw-mcp`), `keychain_account` (default `typesafe`), `jev_model` (default `jev-1.14.0`), `max_output_tokens` (default 4096), `reasoning_effort` (unset), `require_ticket` (default false), `allow_unsandboxed_nisi` (default false), `nisi_activity_log` (default false) and `check_python` (unset). `require_ticket: true` makes `agiw_nisi_run` refuse a request that has no claim ticket.
+Other keys: `reviewer_base_url` (optional, same loopback rule; otherwise the reviewer uses `model_base_url`), `keychain_service` (default `agiw-mcp`), `keychain_account` (default `typesafe`), `jev_model` (default `jev-1.14.0`; `jev-latest` is also accepted and skips the check that the served model matches the configured one), `max_output_tokens` (default 4096), `reasoning_effort` (unset), `require_ticket` (default false), `allow_unsandboxed_nisi` (default false), `nisi_activity_log` (default false) and `check_python` (unset). `require_ticket: true` makes `agiw_nisi_run` refuse a request that has no claim ticket.
 
 `check_python` is an optional absolute path to the Python interpreter used only for Nisi's Python syntax check. It must be a string of 1 to 1024 characters with no C0, DEL, or C1 control characters. Omit it to keep using the Python interpreter that runs agiw-mcp. `null` is invalid. The interpreter is probed for a strict `X.Y.Z` version after ticket admission and before temporary-directory creation, using fixed `-I -S -B` flags and a 3 second limit. The probe imposes no minimum Python version. A failed probe returns `CHECK_PYTHON_UNAVAILABLE` with a fixed message that does not include the path; a ticketed request releases its ticket. `agiw_status` includes `checkPython` with `path` in display form and `version`. When configured, readiness adds `syntax_python` after the Nisi check. The selected version is included in `pythonCheckerVersion` and the input fingerprint; the interpreter path is not part of the fingerprint. The path is not an environment override or a tool argument. Older builds reject this key as `CONFIG_INVALID`; remove it before downgrading.
 
