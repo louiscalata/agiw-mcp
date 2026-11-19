@@ -150,6 +150,11 @@ jobs:
             "$RUNNER_TEMP/installed/bin/python" -I "$GITHUB_WORKSPACE/scripts/installed_smoke.py"
             AGIW_MCP_TEST_INSTALLED=1 "$RUNNER_TEMP/installed/bin/python" -B -m unittest discover \
               -s "$GITHUB_WORKSPACE/tests" -p test_nisi_model_responses.py -v
+            # Replay the Jev boundary golden fixtures against the installed archive, not src/.
+            AGIW_MCP_TEST_INSTALLED=1 "$RUNNER_TEMP/installed/bin/python" -B -c \
+              "import agiw_mcp, sys; sys.exit('agiw_mcp imported from the checkout' if '$GITHUB_WORKSPACE' in agiw_mcp.__file__ else 0)"
+            AGIW_MCP_TEST_INSTALLED=1 "$RUNNER_TEMP/installed/bin/python" -B -m unittest discover \
+              -s "$GITHUB_WORKSPACE/tests" -p 'test_jev_analyse_golden*.py'
             cd "$GITHUB_WORKSPACE"
             rm -rf "$RUNNER_TEMP/installed"
           done
