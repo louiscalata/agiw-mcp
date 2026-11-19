@@ -321,60 +321,95 @@ def _progress_notification(token: str | int, event: dict, count: int, version: s
     return {"jsonrpc": "2.0", "method": "notifications/progress", "params": params}
 
 
-def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:  # noqa: C901 - one loop owns reads, workers and cancellation
-    stdin = stdin or sys.stdin.buffer
-    stdout = stdout or sys.stdout.buffer
-    events = queue.Queue(maxsize=16)
-    stopped = threading.Event()
-    pending = deque()
-    active = None
-    negotiated_version = None
-    progress_count = 0
+def _is_cancel_notification(message: object) -> bool:
+    return (
+        isinstance(message, dict)
+        and message.get("jsonrpc") == "2.0"
+        and "id" not in message
+        and message.get("method") == "notifications/cancelled"
+    )
 
-    def post(event: tuple) -> None:
-        while not stopped.is_set():
+
+def _cancelled_id(message: dict):
+    """The valid requestId a cancellation names, or None."""
+    params = message.get("params")
+    identifier = params.get("requestId") if isinstance(params, dict) else None
+    return identifier if _valid_id(identifier) else None
+
+
+def _same_id(left, right) -> bool:
+    return type(left) is type(right) and left == right
+
+
+def _drop_queued(pending: deque, identifier) -> deque:
+    """Queued requests minus any whose id matches the cancelled one."""
+    return deque(item for item in pending if not (isinstance(item, dict) and _same_id(item.get("id"), identifier)))
+
+
+def _is_nisi_run(message: object) -> bool:
+    """Only the long-running Nisi tool needs a worker. Other tools retain synchronous ordering."""
+    if not isinstance(message, dict) or message.get("method") != "tools/call" or not _valid_id(message.get("id")):
+        return False
+    params = message.get("params")
+    return isinstance(params, dict) and params.get("name") == "agiw_nisi_run"
+
+
+class _Session:
+    """One stdio session: a reader thread feeds events; this loop owns replies, the worker and cancellation."""
+
+    def __init__(self, stdin: BinaryIO, stdout: BinaryIO) -> None:
+        self.stdin = stdin
+        self.stdout = stdout
+        self.events = queue.Queue(maxsize=16)
+        self.stopped = threading.Event()
+        self.pending = deque()
+        self.active = None  # (id, cancel event, worker thread, progress token, progress version)
+        self.negotiated_version = None
+        self.progress_count = 0
+
+    def post(self, event: tuple) -> None:
+        while not self.stopped.is_set():
             try:
-                events.put(event, timeout=0.1)
+                self.events.put(event, timeout=0.1)
                 return
             except queue.Full:
                 continue
 
-    def read() -> None:
-        while not stopped.is_set():
+    def read(self) -> None:
+        while not self.stopped.is_set():
             try:
-                frame = read_frame(stdin)
+                frame = read_frame(self.stdin)
             except _FrameTooLarge:
-                post(("large", None))
+                self.post(("large", None))
                 continue
             except (OSError, ValueError):
                 frame = None
-            post(("frame", frame))
+            self.post(("frame", frame))
             if frame is None:
                 return
 
-    def respond(reply: dict | None) -> None:
+    def respond(self, reply: dict | None) -> None:
         if reply is not None:
-            stdout.write(encode(reply))
-            stdout.flush()
+            self.stdout.write(encode(reply))
+            self.stdout.flush()
 
-    def dispatch(message: object) -> dict | None:
-        nonlocal negotiated_version
+    def dispatch(self, message: object) -> dict | None:
         try:
             reply = handle(message)
             if isinstance(message, dict) and message.get("method") == "initialize" and reply and "result" in reply:
-                negotiated_version = reply["result"]["protocolVersion"]
+                self.negotiated_version = reply["result"]["protocolVersion"]
             return reply
         except Exception as exc:  # noqa: BLE001 - request boundary: logged to stderr, answered as INTERNAL_ERROR
             _diag("internal error: " + type(exc).__name__)
             identifier = message.get("id") if isinstance(message, dict) and _valid_id(message.get("id")) else None
             return _error(identifier, INTERNAL_ERROR, "Internal error")
 
-    def run(message: dict, cancel: threading.Event) -> None:
+    def run(self, message: dict, cancel: threading.Event) -> None:
         def progress(event: dict) -> None:
-            if stopped.is_set() or cancel.is_set():
+            if self.stopped.is_set() or cancel.is_set():
                 return
             try:
-                events.put_nowait(("progress", (cancel, event)))
+                self.events.put_nowait(("progress", (cancel, event)))
             except queue.Full:
                 pass  # Progress is lossy; never delay the runner or terminal result.
 
@@ -382,108 +417,117 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
         if _progress_token(message) is not None:
             nisi._CANCEL.progress = progress
         try:
-            post(("done", dispatch(message)))
+            self.post(("done", self.dispatch(message)))
         finally:
             if hasattr(nisi._CANCEL, "progress"):
                 del nisi._CANCEL.progress
             del nisi._CANCEL.event
 
-    reader = threading.Thread(target=read, name="agiw-mcp-stdin", daemon=True)
-    reader.start()
-    try:
-        while True:
-            from_pending = False
-            try:
-                # Honor buffered cancellation/EOF before dispatching queued work.
-                kind, value = events.get_nowait() if active is None and pending else events.get()
-            except queue.Empty:
-                message = pending.popleft()
-                from_pending = True
-            else:
-                if kind == "progress":
-                    cancel, event = value
-                    if (
-                        active is not None
-                        and cancel is active[1]
-                        and not cancel.is_set()
-                        and progress_count < nisi.MAX_PROGRESS_EVENTS
-                    ):
-                        progress_count += 1
-                        respond(_progress_notification(active[3], event, progress_count, active[4]))
-                    continue
-                if kind == "done":
-                    if not active[1].is_set():
-                        respond(value)
-                    active[2].join()
-                    active = None
-                    continue
-                if kind == "large":
-                    _diag("discarded an oversized frame")
-                    respond(_error(None, PARSE_ERROR, "Parse error: frame too large"))
-                    continue
-                if value is None:
-                    return 0
-                if not value.strip():
-                    continue
+    def _on_progress(self, value: tuple) -> None:
+        cancel, event = value
+        active = self.active
+        if (
+            active is not None
+            and cancel is active[1]
+            and not cancel.is_set()
+            and self.progress_count < nisi.MAX_PROGRESS_EVENTS
+        ):
+            self.progress_count += 1
+            self.respond(_progress_notification(active[3], event, self.progress_count, active[4]))
+
+    def _on_done(self, reply: dict | None) -> None:
+        if not self.active[1].is_set():
+            self.respond(reply)
+        self.active[2].join()
+        self.active = None
+
+    def _on_event(self, kind: str, value) -> tuple[str, object]:
+        """Handle one reader/worker event. Returns ("message", decoded), ("skip", None) or ("eof", None)."""
+        if kind == "progress":
+            self._on_progress(value)
+            return "skip", None
+        if kind == "done":
+            self._on_done(value)
+            return "skip", None
+        if kind == "large":
+            _diag("discarded an oversized frame")
+            self.respond(_error(None, PARSE_ERROR, "Parse error: frame too large"))
+            return "skip", None
+        if value is None:
+            return "eof", None
+        if not value.strip():
+            return "skip", None
+        try:
+            return "message", decode_frame(value)
+        except (ValueError, UnicodeError, RecursionError):
+            self.respond(_error(None, PARSE_ERROR, "Parse error"))
+            return "skip", None
+
+    def _on_cancel(self, message: dict) -> None:
+        identifier = _cancelled_id(message)
+        if identifier is None:
+            return
+        if self.active and _same_id(identifier, self.active[0]):
+            self.active[1].set()
+        self.pending = _drop_queued(self.pending, identifier)
+
+    def _while_busy(self, message: object) -> None:
+        """A request that arrives while a Nisi run is active or work is queued: answer ping, queue or refuse."""
+        if isinstance(message, dict) and message.get("method") == "ping":
+            self.respond(self.dispatch(message))
+        elif len(self.pending) < 16:
+            self.pending.append(message)
+        elif isinstance(message, dict) and _valid_id(message.get("id")):
+            self.respond(_error(message["id"], INTERNAL_ERROR, "Server busy"))
+
+    def _start(self, message: dict) -> None:
+        cancel = threading.Event()
+        worker = threading.Thread(target=self.run, args=(message, cancel), name="agiw-mcp-nisi")
+        self.active = (
+            message["id"],
+            cancel,
+            worker,
+            _progress_token(message),
+            _progress_version(message, self.negotiated_version),
+        )
+        self.progress_count = 0
+        worker.start()
+
+    def loop(self) -> int:
+        reader = threading.Thread(target=self.read, name="agiw-mcp-stdin", daemon=True)
+        reader.start()
+        try:
+            while True:
+                from_pending = False
                 try:
-                    message = decode_frame(value)
-                except (ValueError, UnicodeError, RecursionError):
-                    respond(_error(None, PARSE_ERROR, "Parse error"))
-                    continue
-            if (
-                isinstance(message, dict)
-                and message.get("jsonrpc") == "2.0"
-                and "id" not in message
-                and message.get("method") == "notifications/cancelled"
-            ):
-                params = message.get("params")
-                identifier = params.get("requestId") if isinstance(params, dict) else None
-                if _valid_id(identifier):
-                    if active and type(identifier) is type(active[0]) and identifier == active[0]:
-                        active[1].set()
-                    pending = deque(
-                        item
-                        for item in pending
-                        if not (
-                            isinstance(item, dict)
-                            and type(item.get("id")) is type(identifier)
-                            and item.get("id") == identifier
-                        )
+                    # Honor buffered cancellation/EOF before dispatching queued work.
+                    kind, value = (
+                        self.events.get_nowait() if self.active is None and self.pending else self.events.get()
                     )
-                continue
-            if not from_pending and (active is not None or pending):
-                if isinstance(message, dict) and message.get("method") == "ping":
-                    respond(dispatch(message))
-                elif len(pending) < 16:
-                    pending.append(message)
-                elif isinstance(message, dict) and _valid_id(message.get("id")):
-                    respond(_error(message["id"], INTERNAL_ERROR, "Server busy"))
-                continue
-            # Only the long-running Nisi tool needs a worker. Other tools retain synchronous ordering.
-            params = message.get("params") if isinstance(message, dict) else None
-            if (
-                isinstance(message, dict)
-                and message.get("method") == "tools/call"
-                and _valid_id(message.get("id"))
-                and isinstance(params, dict)
-                and params.get("name") == "agiw_nisi_run"
-            ):
-                cancel = threading.Event()
-                worker = threading.Thread(target=run, args=(message, cancel), name="agiw-mcp-nisi")
-                active = (
-                    message["id"],
-                    cancel,
-                    worker,
-                    _progress_token(message),
-                    _progress_version(message, negotiated_version),
-                )
-                progress_count = 0
-                worker.start()
-            else:
-                respond(dispatch(message))
-    finally:
-        stopped.set()
-        if active is not None:
-            active[1].set()
-            active[2].join()
-        reader.join(timeout=0.2)
+                except queue.Empty:
+                    message = self.pending.popleft()
+                    from_pending = True
+                else:
+                    state, message = self._on_event(kind, value)
+                    if state == "eof":
+                        return 0
+                    if state == "skip":
+                        continue
+                if _is_cancel_notification(message):
+                    self._on_cancel(message)
+                elif not from_pending and (self.active is not None or self.pending):
+                    self._while_busy(message)
+                elif _is_nisi_run(message):
+                    self._start(message)
+                else:
+                    self.respond(self.dispatch(message))
+        finally:
+            self.stopped.set()
+            if self.active is not None:
+                self.active[1].set()
+                self.active[2].join()
+            reader.join(timeout=0.2)
+
+
+def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
+    return _Session(stdin or sys.stdin.buffer, stdout or sys.stdout.buffer).loop()
