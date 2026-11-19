@@ -14,6 +14,10 @@ The latest release is `v0.1.0`. Main contains later fixes and still reports vers
 - [x] State the readiness permission-flag check in the `agiw_readiness` description and the Jev log rotation in SECURITY.md (#55).
 - [x] Send optional progress notifications for `agiw_nisi_run` (lane L4 of [docs/design/v0.2.md](docs/design/v0.2.md), #56).
 - [x] Harden the opt-in Nisi activity record against concurrent rotation, short writes, hard links and unsafe config directory handling; preserve a safe line for malformed nullable report metadata.
+- [x] Answer protocol `2026-07-28` statelessly alongside the unchanged legacy handshake: gaps G1 to G6, G10 and G13 of [docs/design/protocol-2026-07-28.md](docs/design/protocol-2026-07-28.md) (#68). The modern path is taken only when `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key (#71).
+- [x] Vendor public Nisi 0.3.2 in place of 0.2.0, pinned by its manifest hash (#70).
+- [x] Hold the opt-in Nisi activity record's lock with `flock` on macOS and Linux, so a killed writer no longer blocks later records, and mark a failed rollback with `nisi-activity.jsonl.damaged` (#72).
+- [x] Test Python 3.14 in CI next to 3.10, 3.12 and 3.13 (#73).
 - [ ] Resolve the two remaining public-review findings: commit metadata in published history, and the private scrub definitions listed under Deferred work. Both need an owner decision.
 - [ ] Assign a version and publish a reviewed release containing the changes on main.
 
@@ -26,4 +30,4 @@ CI does not verify live TypeSafe requests or launch the supported MCP clients.
 ## Deferred work
 
 - Move private scrub definitions out of the public scrub checker without weakening detection; the current checks are kept until then.
-- Lane L6 of [docs/design/v0.2.md](docs/design/v0.2.md), the protocol `2026-07-28` gap list, is a proposal only. Lane L5, the local record of Nisi runs, is implemented as an opt-in `nisi_activity_log` key that is off by default; design decision D3 (on or off by default) is still open.
+- Lane L6 of [docs/design/v0.2.md](docs/design/v0.2.md), the protocol `2026-07-28` gap list: G1 to G6, G10 and G13 are implemented (#68); the other gaps in [docs/design/protocol-2026-07-28.md](docs/design/protocol-2026-07-28.md) stay open. Lane L5, the local record of Nisi runs, is implemented as an opt-in `nisi_activity_log` key that is off by default; design decision D3 (on or off by default) is still open.
