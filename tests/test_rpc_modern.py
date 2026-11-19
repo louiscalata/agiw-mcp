@@ -62,8 +62,8 @@ def modern(method: str, params: dict | None = None, identifier=1) -> dict:
 class RpcModernTests(IsolatedTestCase):
     def test_modern_requests_need_protocol_version_and_client_capabilities(self):
         cases = [
-            {"io.modelcontextprotocol/clientCapabilities": {}},
             {"io.modelcontextprotocol/protocolVersion": "2026-07-28"},
+            {"io.modelcontextprotocol/protocolVersion": None, "io.modelcontextprotocol/clientCapabilities": {}},
             {
                 "io.modelcontextprotocol/protocolVersion": 20260728,
                 "io.modelcontextprotocol/clientCapabilities": {},
@@ -154,6 +154,30 @@ class RpcModernTests(IsolatedTestCase):
             self.assertNotIn("_meta", reply["result"])
         self.assertEqual(set(replies[1]["result"]), {"tools"})
         self.assertEqual(set(replies[2]["result"]), {"content", "structuredContent", "isError"})
+
+    def test_other_modern_meta_keys_without_protocol_version_stay_legacy(self):
+        related = {"io.modelcontextprotocol/related-task": {"taskId": "task-1"}}
+        caps_only = {"io.modelcontextprotocol/clientCapabilities": {}}
+        replies = exchange(
+            frame(INIT),
+            frame(
+                request(
+                    "tools/call",
+                    {"name": "agiw_consent", "arguments": {"action": "show"}, "_meta": related},
+                    identifier=2,
+                )
+            ),
+            frame(request("tools/list", {"_meta": caps_only}, identifier=3)),
+            frame(request("ping", {"_meta": related}, identifier=4)),
+        )
+        self.assertEqual([reply["id"] for reply in replies], [1, 2, 3, 4])
+        for reply in replies:
+            self.assertNotIn("error", reply)
+        called, listed = replies[1]["result"], replies[2]["result"]
+        self.assertEqual(set(called), {"content", "structuredContent", "isError"})
+        self.assertFalse(called["isError"])
+        self.assertEqual(set(listed), {"tools"})
+        self.assertEqual(replies[3], {"jsonrpc": "2.0", "id": 4, "result": {}})
 
     def test_ping_is_removed_for_modern_requests_only(self):
         replies = exchange(
@@ -259,6 +283,30 @@ class RpcModernProgressTests(IsolatedTestCase):
         )
         self.assertEqual(result["id"], "run")
         self.assertEqual(result["result"]["resultType"], "complete")
+
+    def test_modern_run_with_bad_version_errors_without_progress_or_tool_call(self):
+        stdin, stdout = _Input(), _Output()
+        meta = dict(MODERN_META, progressToken="token", **{"io.modelcontextprotocol/protocolVersion": "1900-01-01"})
+        params = {"name": "agiw_nisi_run", "arguments": {}, "_meta": meta}
+        with mock.patch.object(rpc, "call_tool") as tool:
+            server = threading.Thread(target=rpc.serve, args=(stdin, stdout), daemon=True)
+            server.start()
+            try:
+                stdin.send(request("tools/call", params, identifier="run"))
+                reply = stdout.frames.get(timeout=5)
+                stdin.send({"jsonrpc": "2.0", "id": "after", "method": "ping"})
+                after = stdout.frames.get(timeout=5)
+            finally:
+                stdin.close()
+                server.join(timeout=5)
+        self.assertFalse(server.is_alive(), "stdio server did not stop")
+        tool.assert_not_called()
+        self.assertEqual(reply["id"], "run")
+        self.assertNotIn("result", reply)
+        self.assertEqual(reply["error"]["code"], -32022)
+        self.assertEqual(reply["error"]["data"], {"supported": ["2026-07-28"], "requested": "1900-01-01"})
+        self.assertEqual(after, {"jsonrpc": "2.0", "id": "after", "result": {}})
+        self.assertTrue(stdout.frames.empty())
 
 
 if __name__ == "__main__":

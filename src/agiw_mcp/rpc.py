@@ -25,11 +25,11 @@ MAX_LINE_BYTES = 4 * 1024 * 1024
 MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 # Legacy initialize handshake. Newest first. 2026-07-28 is not in this list.
 SUPPORTED_PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
-# Modern per-request protocol. A request whose params._meta carries any key with
-# this prefix is answered statelessly under MODERN_PROTOCOLS; every other
-# request, including initialize, keeps the legacy handshake and its frames.
+# Modern per-request protocol. A request whose params._meta carries the
+# PROTOCOL_VERSION_KEY is answered statelessly under MODERN_PROTOCOLS; every
+# other request, including initialize and a legacy request that carries other
+# io.modelcontextprotocol/ keys, keeps the legacy handshake and its frames.
 MODERN_PROTOCOLS = ("2026-07-28",)
-MODERN_META_PREFIX = "io.modelcontextprotocol/"
 PROTOCOL_VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
 CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
 SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
@@ -102,7 +102,9 @@ def _modern_meta(method: object, params: dict) -> dict | None:
     meta = params.get("_meta")
     if not isinstance(meta, dict):
         return None
-    if not any(isinstance(key, str) and key.startswith(MODERN_META_PREFIX) for key in meta):
+    # Legacy clients may send other io.modelcontextprotocol/ keys (for example
+    # related-task); only the per-request protocol version selects the modern path.
+    if PROTOCOL_VERSION_KEY not in meta:
         return None
     return meta
 

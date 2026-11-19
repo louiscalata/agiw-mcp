@@ -45,7 +45,7 @@ With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize requ
 
 The legacy `initialize` handshake accepts `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
 
-The server is dual-era. A request whose `params._meta` carries any `io.modelcontextprotocol/` key is answered as protocol `2026-07-28` without an `initialize` first: `server/discover`, `tools/list` and `tools/call` add `resultType`, the cache hints `ttlMs` and `cacheScope` where the revision requires them, and `_meta` server identity. A request with that `_meta` must name `2026-07-28` and carry a `clientCapabilities` object. `initialize` itself is always legacy, and a request without that `_meta` is answered exactly as before.
+The server is dual-era. A request whose `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key is answered as protocol `2026-07-28` without an `initialize` first: `server/discover`, `tools/list` and `tools/call` add `resultType`, the cache hints `ttlMs` and `cacheScope` where the revision requires them, and `_meta` server identity. A request with that key must name `2026-07-28` and carry an `io.modelcontextprotocol/clientCapabilities` object. `initialize` itself is always legacy, and a request without that key, including one that carries other `io.modelcontextprotocol/` keys such as `related-task`, is answered exactly as before.
 
 Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are in [Client setup](#client-setup).
 
@@ -83,7 +83,7 @@ a valid progress token, MCP stdout frames remain unchanged.
 **Works**
 
 - The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
-- Dual-era MCP. Requests whose `params._meta` carries an `io.modelcontextprotocol/` key are answered statelessly as protocol `2026-07-28`, and every legacy frame is unchanged.
+- Dual-era MCP. Requests whose `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key are answered statelessly as protocol `2026-07-28`, and every legacy frame is unchanged.
 - An optional `check_python` interpreter for Nisi's Python syntax check.
 - Vendored Nisi v0.2.0, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text. An optional, default-off record of Nisi runs (`nisi_activity_log`) stores hashes, codes, time and counts.
@@ -264,7 +264,7 @@ droid mcp add agiw agiw-mcp
 }
 ```
 
-**OpenCode.** Current config puts each server under `mcp.servers` in `opencode.json` or `opencode.jsonc`. `type` is `local` and `command` is an array. `codemode` defaults to true; `false` leaves these six tools on the native tool list. `protocol` defaults to `legacy`, which uses `initialize` through `2025-11-25`. A modern client that sends `params._meta` with an `io.modelcontextprotocol/` key is answered as protocol `2026-07-28` by the same process.
+**OpenCode.** Current config puts each server under `mcp.servers` in `opencode.json` or `opencode.jsonc`. `type` is `local` and `command` is an array. `codemode` defaults to true; `false` leaves these six tools on the native tool list. `protocol` defaults to `legacy`, which uses `initialize` through `2025-11-25`. A modern client that sends `params._meta` with the `io.modelcontextprotocol/protocolVersion` key is answered as protocol `2026-07-28` by the same process.
 
 ```bash
 opencode mcp add agiw -- agiw-mcp
