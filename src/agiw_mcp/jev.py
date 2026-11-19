@@ -86,6 +86,71 @@ def _answer_valid(question: dict, answer) -> bool:
     return _finite(value) and 0 <= value <= len(question["criteria"]) - 1
 
 
+_HTTP_HINTS = {
+    401: " The API key was rejected.",
+    403: " The API key is not allowed to use this model.",
+    429: " TypeSafe is rate limiting; wait before trying again.",
+}
+
+
+def _failure_error(failure: HttpFailure, log) -> ToolError:
+    """Log one failed exchange and return the fixed-message error for it (the caller raises it)."""
+    if failure.kind == "busy":
+        log("BUSY")
+        return ToolError(
+            "JEV_BUSY",
+            "Local HTTP workers are busy; nothing was sent. "
+            "Wait for an in-flight request to finish before trying again. Not retried.",
+        )
+    if failure.kind == "http":
+        log("HTTP_ERROR", failure.status)
+        hint = _HTTP_HINTS.get(failure.status, "")
+        return ToolError(
+            "JEV_HTTP_ERROR",
+            f"TypeSafe returned HTTP {failure.status}.{hint} Not retried.",
+            httpStatus=failure.status,
+        )
+    if failure.kind == "redirect":
+        log("REDIRECT_REFUSED", failure.status)
+        return ToolError("JEV_REDIRECT_REFUSED", "TypeSafe answered with a redirect; it was not followed.")
+    if failure.kind in ("invalid_json", "too_large"):
+        log("BAD_RESPONSE", failure.status)
+        return ToolError("JEV_BAD_RESPONSE", "TypeSafe's response was not a valid Jev answer.")
+    log("UNREACHABLE")
+    return ToolError(
+        "JEV_UNREACHABLE", "The TypeSafe exchange failed or timed out. The request may have been sent. Not retried."
+    )
+
+
+def _answers(response, questions: dict) -> dict | None:
+    """The answers dict if it answers exactly the fixed questions with valid values, else None."""
+    answers = response.get("answers") if isinstance(response, dict) else None
+    if (
+        not isinstance(answers, dict)
+        or set(answers) != set(questions)
+        or not all(_answer_valid(questions[qid], answers[qid]) for qid in questions)
+    ):
+        return None
+    return answers
+
+
+def _row(qid: str, question: dict, answer: dict) -> dict:
+    value = answer.get("noul") if question["type"] == "noul" else answer.get("score")
+    row = {
+        "id": qid,
+        "type": question["type"],
+        "question": question["instructions"],
+        "criteria": question["criteria"],
+        "answer": round(float(value), 4),
+        "flagged": is_flagged(question, answer),
+    }
+    if question["type"] == "score":
+        row["scaleMax"] = len(question["criteria"]) - 1
+    if _finite(answer.get("confidence")):
+        row["confidence"] = round(float(answer["confidence"]), 4)
+    return row
+
+
 def analyse(phase: str, text, config: Config) -> dict:
     tool = f"agiw_jev_{phase}"
     sent_text, input_bytes, truncated = _prepare(phase, text)
@@ -134,44 +199,12 @@ def analyse(phase: str, text, config: Config) -> dict:
         log("ENDPOINT_REFUSED")
         raise ToolError("JEV_ENDPOINT_REFUSED", "The Jev endpoint was refused by policy; nothing was sent.") from None
     except HttpFailure as failure:
-        if failure.kind == "busy":
-            log("BUSY")
-            raise ToolError(
-                "JEV_BUSY",
-                "Local HTTP workers are busy; nothing was sent. "
-                "Wait for an in-flight request to finish before trying again. Not retried.",
-            ) from None
-        if failure.kind == "http":
-            log("HTTP_ERROR", failure.status)
-            hint = {
-                401: " The API key was rejected.",
-                403: " The API key is not allowed to use this model.",
-                429: " TypeSafe is rate limiting; wait before trying again.",
-            }.get(failure.status, "")
-            raise ToolError(
-                "JEV_HTTP_ERROR",
-                f"TypeSafe returned HTTP {failure.status}.{hint} Not retried.",
-                httpStatus=failure.status,
-            ) from None
-        if failure.kind == "redirect":
-            log("REDIRECT_REFUSED", failure.status)
-            raise ToolError("JEV_REDIRECT_REFUSED", "TypeSafe answered with a redirect; it was not followed.") from None
-        if failure.kind in ("invalid_json", "too_large"):
-            log("BAD_RESPONSE", failure.status)
-            raise ToolError("JEV_BAD_RESPONSE", "TypeSafe's response was not a valid Jev answer.") from None
-        log("UNREACHABLE")
-        raise ToolError(
-            "JEV_UNREACHABLE", "The TypeSafe exchange failed or timed out. The request may have been sent. Not retried."
-        ) from None
+        raise _failure_error(failure, log) from None
     finally:
         key = None  # drop the reference as early as possible
 
-    answers = response.get("answers") if isinstance(response, dict) else None
-    if (
-        not isinstance(answers, dict)
-        or set(answers) != set(questions)
-        or not all(_answer_valid(questions[qid], answers[qid]) for qid in questions)
-    ):
+    answers = _answers(response, questions)
+    if answers is None:
         log("BAD_RESPONSE", status)
         raise ToolError("JEV_BAD_RESPONSE", "TypeSafe's response did not answer the fixed questions.")
     served = response.get("model")
@@ -182,23 +215,7 @@ def analyse(phase: str, text, config: Config) -> dict:
             "TypeSafe served a different Jev model than the one configured.",
             requestedModel=config.jev_model,
         )
-    rows = []
-    for qid, question in questions.items():
-        answer = answers[qid]
-        value = answer.get("noul") if question["type"] == "noul" else answer.get("score")
-        row = {
-            "id": qid,
-            "type": question["type"],
-            "question": question["instructions"],
-            "criteria": question["criteria"],
-            "answer": round(float(value), 4),
-            "flagged": is_flagged(question, answer),
-        }
-        if question["type"] == "score":
-            row["scaleMax"] = len(question["criteria"]) - 1
-        if _finite(answer.get("confidence")):
-            row["confidence"] = round(float(answer["confidence"]), 4)
-        rows.append(row)
+    rows = [_row(qid, question, answers[qid]) for qid, question in questions.items()]
     flagged = [row["id"] for row in rows if row["flagged"]]
     log("ANSWERED", status, len(flagged))
     return {
