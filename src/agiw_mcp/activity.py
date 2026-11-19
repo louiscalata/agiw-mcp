@@ -9,6 +9,10 @@ The Jev log (jev-activity.jsonl) is always written. The Nisi log (nisi-activity.
 when config.json sets nisi_activity_log to true; the caller decides, this module just refuses anything
 that is not on the allowlist. Both rotate to a single ".1" file above MAX_LOG_BYTES. The Nisi log is
 opened without following a symlink and only if it is a regular file.
+
+On POSIX the Nisi writer serializes with flock on a persistent nisi-activity.jsonl.lock that is never
+removed, so a killed writer cannot wedge the record. Without fcntl it falls back to an exclusive-create lock
+file. A failed rollback creates nisi-activity.jsonl.damaged; while it exists no line is written.
 """
 
 from __future__ import annotations
@@ -19,12 +23,19 @@ import os
 from pathlib import Path
 import re
 import stat
+import sys
 import time
 
 from .config import config_dir, ensure_private_dir
 
+try:
+    import fcntl
+except ImportError:  # Windows: the exclusive-create fallback below is used instead
+    fcntl = None
+
 LOG_FILE = "jev-activity.jsonl"
 NISI_LOG_FILE = "nisi-activity.jsonl"
+NISI_DAMAGED_SUFFIX = ".damaged"
 MAX_LOG_BYTES = 1024 * 1024
 _NISI_LOCK_ATTEMPTS = 20
 _NISI_LOCK_DELAY = 0.005
@@ -89,7 +100,7 @@ def record(**fields) -> bool:
 
 
 class _NisiRollbackError(OSError):
-    """A failed rollback leaves the lock in place until the damaged log is repaired."""
+    """A partial write could not be rolled back; the caller writes the damaged marker."""
 
 
 def _prepare_nisi_directory(directory: Path) -> os.stat_result:
@@ -108,7 +119,30 @@ def _prepare_nisi_directory(directory: Path) -> os.stat_result:
     return info
 
 
+def _take_nisi_flock(path: str, kwargs: dict[str, int]) -> int | None:
+    """Lock the persistent lock file with flock; the kernel releases it when the holder exits or closes it."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(path, flags, 0o600, **kwargs)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise OSError("The activity lock is not a regular file.")
+        for attempt in range(_NISI_LOCK_ATTEMPTS):
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return fd
+            except BlockingIOError:
+                if attempt + 1 < _NISI_LOCK_ATTEMPTS:
+                    time.sleep(_NISI_LOCK_DELAY)
+    except BaseException:
+        _close_quietly(fd)
+        raise
+    _close_quietly(fd)
+    return None
+
+
 def _take_nisi_lock(path: str, kwargs: dict[str, int]) -> int | None:
+    """Fallback without fcntl: an exclusive-create lock file that the holder removes by name."""
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     for attempt in range(_NISI_LOCK_ATTEMPTS):
         try:
@@ -117,6 +151,25 @@ def _take_nisi_lock(path: str, kwargs: dict[str, int]) -> int | None:
             if attempt + 1 < _NISI_LOCK_ATTEMPTS:
                 time.sleep(_NISI_LOCK_DELAY)
     return None
+
+
+def _close_quietly(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _mark_nisi_damaged(path: str, kwargs: dict[str, int]) -> bool:
+    """Create the damaged marker; True when it exists afterwards. Its contents are empty."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        _close_quietly(os.open(path, flags, 0o600, **kwargs))
+    except FileExistsError:
+        pass
+    except OSError:
+        return False
+    return True
 
 
 def _append_nisi_line(path: str, previous: str, kwargs: dict[str, int], line: bytes) -> bool:
@@ -153,54 +206,85 @@ def _append_nisi_line(path: str, previous: str, kwargs: dict[str, int], line: by
         try:
             os.close(fd)
         except OSError:
-            # Preserve the rollback failure so the caller keeps the damaged log locked.
+            # Preserve the rollback failure so the caller marks the log as damaged.
             if not rollback_failed:
                 raise
 
 
-def _record_nisi_line(directory: Path, line: bytes) -> bool:
+def _record_nisi_line(directory: Path, line: bytes) -> str:
+    """Return "written", or the reason the line was skipped: "locked", "damaged" or "error"."""
     info = _prepare_nisi_directory(directory)
     directory_fd = None
     try:
         kwargs = {}
         path = str(directory / NISI_LOG_FILE)
-        previous = path + ".1"
-        lock_path = path + ".lock"
         if os.name == "posix":
             flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
             directory_fd = os.open(directory, flags)
             opened = os.fstat(directory_fd)
             if not stat.S_ISDIR(opened.st_mode) or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
-                return False
+                return "error"
             kwargs = {"dir_fd": directory_fd}
             path = NISI_LOG_FILE
-            previous = path + ".1"
-            lock_path = path + ".lock"
-        lock_fd = _take_nisi_lock(lock_path, kwargs)
+        previous = path + ".1"
+        lock_path = path + ".lock"
+        damaged_path = path + NISI_DAMAGED_SUFFIX
+        persistent = fcntl is not None and bool(kwargs)
+        lock_fd = _take_nisi_flock(lock_path, kwargs) if persistent else _take_nisi_lock(lock_path, kwargs)
         if lock_fd is None:
-            return False
-        release_lock = True
+            return "locked"
+        remove_lock = not persistent
         try:
-            return _append_nisi_line(path, previous, kwargs, line)
-        except _NisiRollbackError:
-            release_lock = False
-            return False
+            try:
+                os.lstat(damaged_path, **kwargs)
+                return "damaged"
+            except FileNotFoundError:
+                pass
+            try:
+                return "written" if _append_nisi_line(path, previous, kwargs, line) else "error"
+            except _NisiRollbackError:
+                # Without a marker, the fallback keeps its lock file so later calls still skip the damaged log.
+                if not _mark_nisi_damaged(damaged_path, kwargs) and not persistent:
+                    remove_lock = False
+                return "damaged"
         finally:
-            os.close(lock_fd)
-            if release_lock:
-                os.unlink(lock_path, **kwargs)
+            _close_quietly(lock_fd)
+            if remove_lock:
+                # Separate from the close, so a close error cannot leave the fallback lock behind.
+                try:
+                    os.unlink(lock_path, **kwargs)
+                except OSError:
+                    pass
     finally:
         if directory_fd is not None:
-            os.close(directory_fd)
+            _close_quietly(directory_fd)
+
+
+def _skipped(reason: str) -> None:
+    """One fixed stderr line per skipped record; it never carries request content, paths or fingerprints."""
+    try:
+        sys.stderr.write(f"agiw-mcp: nisi activity record skipped ({reason})\n")
+        sys.stderr.flush()
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 def record_nisi(**fields) -> bool:
-    """Append one typed Nisi run line; a busy lock or write failure returns False without failing the run."""
+    """Append one typed Nisi run line; True only when the line was written.
+
+    A busy lock, the damaged marker or a write failure returns False without failing the run and prints one
+    fixed line to stderr. After a partial write that cannot be rolled back, nisi-activity.jsonl.damaged is
+    created and every later call skips the record until an operator inspects or removes the log and deletes
+    that marker."""
     entry = _entry(fields, _NISI_FIELDS, complete=True)
     if entry is None:
         return False
     line = (json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     try:
-        return _record_nisi_line(config_dir(), line)
+        status = _record_nisi_line(config_dir(), line)
     except (OSError, ValueError):
-        return False
+        status = "error"
+    if status == "written":
+        return True
+    _skipped(status)
+    return False
