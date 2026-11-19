@@ -14,7 +14,7 @@ import agiw_mcp
 from agiw_mcp import nisi, rpc
 
 assert Path(agiw_mcp.__file__).resolve().is_relative_to(Path(sysconfig.get_path("purelib")).resolve())
-assert nisi.verify_vendor()["version"] == "0.2.0"
+assert nisi.verify_vendor()["version"] == "0.3.2"
 assert nisi.RUNNER.is_file()
 initialized = rpc.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
 assert initialized["result"]["serverInfo"]["version"] == agiw_mcp.__version__

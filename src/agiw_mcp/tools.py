@@ -148,7 +148,7 @@ TOOLS = [
         "name": "agiw_nisi_run",
         "title": "Run one Nisi workflow locally",
         "description": (
-            "Run one Nisi v0.2.0 workflow (draft, syntax check, tests, independent review, bounded "
+            "Run one Nisi v0.3.2 workflow (draft, syntax check, tests, independent review, bounded "
             "repair) on file CONTENTS you pass in, using the configured local author and reviewer "
             "models. Runs in a private temporary directory that is removed afterwards. Never reads or "
             "writes project files and never executes generated code; returns proposed contents and "

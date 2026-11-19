@@ -10,7 +10,7 @@ Guidance for coding agents using this repository. Start with
 
 AGIW MCP is a local stdio MCP server for one machine. It reports whether
 online code mode can run here, can send optional advisory questions to
-TypeSafe's Jev model, and can run one Nisi v0.2.0 workflow on file contents
+TypeSafe's Jev model, and can run one Nisi v0.3.2 workflow on file contents
 the caller supplies. The six tools are `agiw_readiness`, `agiw_status`,
 `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, and `agiw_nisi_run`. Python
 3.10 or newer, standard library only. Node.js 22 or newer is required for a
@@ -37,7 +37,7 @@ Fail closed on vendor hashes, tickets, keys, and model URLs.
   verifies the bundle and runs one workflow. `nisi_runner.mjs` is this
   server's host runner. `tickets.py` admits claim tickets. `config.py`,
   `net.py`, `questions.py`, `activity.py`, and `errors.py` support them.
-- `src/agiw_mcp/vendor/nisi/` — pinned public Nisi v0.2.0. The host runner is outside that bundle.
+- `src/agiw_mcp/vendor/nisi/` — pinned public Nisi v0.3.2. The host runner is outside that bundle.
 - `tests/` — `unittest` modules. They do not use the network.
 - `scripts/scrub_check.py`, `scripts/stdio_handshake.py`,
   `scripts/installed_smoke.py`, `scripts/suite_compat.py`.
@@ -78,7 +78,7 @@ use the existing Mac runner (`mac-m5`); same-repo Windows jobs use the PC
 - `uv-git-install`: install this commit, `--version`, the stdio handshake, and MCP Inspector `tools/list`.
 - `windows`: Python 3.12 and Node 22. Scrub, compile, and unit tests.
   Ticket-admission tests are skipped. Admission itself stays refused.
-- `suite-compat`: clones AGIW Suite `main` and checks the Nisi v0.2.0 bundle, the LICENSE bytes, and the Jev pin.
+- `suite-compat`: clones AGIW Suite `main` and checks the shared Nisi bundle, the LICENSE bytes, and the Jev pin.
 
 ## Conventions
 
