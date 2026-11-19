@@ -33,6 +33,7 @@ until a release is assigned. Entries under Unreleased are not a new release.
 - Correct the README and SECURITY limitations found by a public review: separate author and reviewer model servers, `reasoning_effort` omitted unless set, valid empty configuration, the tagged README's consent limit, and Windows CI coverage in CONTRIBUTING. The roadmap now lists release and validation work instead of session history. (#41)
 - SECURITY.md maps selected MCP security practices to this stdio server and preserves the same-user consent limit.
 - `docs/release-notes/next.md` preserves historical review notes through pull request #21; it is not a complete account of current main. The version stays `0.1.0`.
+- `docs/release-notes/current-main-draft.md` drafts the notes for current main from tag `v0.1.0` (`f69630a`) to commit `28efb69`. It leaves the release version TBD.
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
 - Use US spellings in the README, contributing notes, and provenance (`license`, `behavior`). The Claude Desktop section distinguishes the current guide's macOS, Windows and Linux paths from the 2025-11-25 snapshot, which lists only macOS and Windows.
 - Point the OpenCode example at `mcp.servers` with `type: local` and `codemode: false`. Add the Linux `secret-tool store` command. State that OpenCode protocol `2026-07-28` is not implemented.
