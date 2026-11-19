@@ -25,6 +25,16 @@ MAX_LINE_BYTES = 4 * 1024 * 1024
 MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 # Legacy initialize handshake. Newest first. 2026-07-28 is not in this list.
 SUPPORTED_PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+# Modern per-request protocol. A request whose params._meta carries the
+# PROTOCOL_VERSION_KEY is answered statelessly under MODERN_PROTOCOLS; every
+# other request, including initialize and a legacy request that carries other
+# io.modelcontextprotocol/ keys, keeps the legacy handshake and its frames.
+MODERN_PROTOCOLS = ("2026-07-28",)
+PROTOCOL_VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
+CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
+SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
+# Cache hint for the tool list, which is a constant for a given release.
+TTL_MS = 3600000
 INSTRUCTIONS = (
     'AGIW MCP. When the user says "initiate online code mode" with no task, call agiw_readiness and report READY '
     "or the first missing local prerequisite with its fix; start nothing else. With a task: use agiw_nisi_run "
@@ -36,6 +46,8 @@ INSTRUCTIONS = (
 )
 
 PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR = -32700, -32600, -32601, -32602, -32603
+# Specification-reserved code for a modern request naming a version this server does not speak.
+UNSUPPORTED_PROTOCOL_VERSION = -32022
 
 
 class _FrameTooLarge(Exception):
@@ -75,11 +87,108 @@ def decode_frame(raw: bytes):
     return json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_reject_constant)
 
 
-def _tool_result(identifier, structured: dict, is_error: bool) -> dict:
+def _tool_result(identifier, structured: dict, is_error: bool, *, modern: bool = False) -> dict:
     text = json.dumps(structured, ensure_ascii=False, indent=1)
-    return _ok(
-        identifier, {"content": [{"type": "text", "text": text}], "structuredContent": structured, "isError": is_error}
-    )
+    result = {"content": [{"type": "text", "text": text}], "structuredContent": structured, "isError": is_error}
+    if modern:
+        result = _modern_result(result, cacheable=False)
+    return _ok(identifier, result)
+
+
+def _modern_meta(method: object, params: dict) -> dict | None:
+    """Return params._meta when this request opts into the modern protocol, else None."""
+    if method == "initialize":
+        return None
+    meta = params.get("_meta")
+    if not isinstance(meta, dict):
+        return None
+    # Legacy clients may send other io.modelcontextprotocol/ keys (for example
+    # related-task); only the per-request protocol version selects the modern path.
+    if PROTOCOL_VERSION_KEY not in meta:
+        return None
+    return meta
+
+
+def _server_info_meta() -> dict:
+    return {SERVER_INFO_KEY: {"name": SERVER_NAME, "version": __version__}}
+
+
+def _modern_result(fields: dict, *, cacheable: bool) -> dict:
+    """Add the modern result fields this server can answer with, without touching the input."""
+    result = dict(fields)
+    result["resultType"] = "complete"
+    if cacheable:
+        result["ttlMs"] = TTL_MS
+        result["cacheScope"] = "public"
+    result["_meta"] = _server_info_meta()
+    return result
+
+
+def _discover_result() -> dict:
+    return {
+        "resultType": "complete",
+        "supportedVersions": list(MODERN_PROTOCOLS),
+        "capabilities": {"tools": {}},
+        "instructions": INSTRUCTIONS,
+        "ttlMs": TTL_MS,
+        "cacheScope": "public",
+        "_meta": _server_info_meta(),
+    }
+
+
+def _unsupported_version(identifier, requested: str) -> dict:
+    reply = _error(identifier, UNSUPPORTED_PROTOCOL_VERSION, "Unsupported protocol version")
+    reply["error"]["data"] = {"supported": list(MODERN_PROTOCOLS), "requested": requested}
+    return reply
+
+
+def _modern_rejection(identifier, meta: dict) -> dict | None:
+    """Answer a malformed or unsupported modern request, or return None when it is valid."""
+    requested = meta.get(PROTOCOL_VERSION_KEY)
+    if not isinstance(requested, str) or not isinstance(meta.get(CLIENT_CAPABILITIES_KEY), dict):
+        return _error(identifier, INVALID_PARAMS, "Invalid params")
+    if requested not in MODERN_PROTOCOLS:
+        return _unsupported_version(identifier, requested)
+    return None
+
+
+def _tools_list(identifier, params: dict, *, modern: bool) -> dict:
+    if set(params) - {"cursor", "_meta"} or "cursor" in params:
+        # This server returns every tool in one page, so any cursor is invalid.
+        return _error(identifier, INVALID_PARAMS, "Invalid params")
+    listed = {"tools": TOOLS}
+    return _ok(identifier, _modern_result(listed, cacheable=True) if modern else listed)
+
+
+def _tools_call(identifier, params: dict, *, modern: bool) -> dict:
+    name, args = params.get("name"), params.get("arguments", {})
+    if args is None:
+        args = {}
+    if set(params) - {"name", "arguments", "_meta"} or not isinstance(name, str) or not isinstance(args, dict):
+        return _error(identifier, INVALID_PARAMS, "Invalid params")
+    if name not in TOOL_NAMES:
+        return _error(identifier, INVALID_PARAMS, f"Unknown tool: {name[:64]}")
+    structured, is_error = call_tool(name, args)
+    return _tool_result(identifier, structured, is_error, modern=modern)
+
+
+def _handle_modern(identifier, method: str, params: dict, meta: dict) -> dict:
+    """Serve one stateless modern request. Never reads or writes the process era."""
+    rejection = _modern_rejection(identifier, meta)
+    if rejection is not None:
+        return rejection
+    if method == "server/discover":
+        if set(params) - {"_meta"}:
+            return _error(identifier, INVALID_PARAMS, "Invalid params")
+        return _ok(identifier, _discover_result())
+    if method == "ping":
+        # ping is removed in 2026-07-28; a dual-era server keeps it for legacy clients only.
+        return _error(identifier, METHOD_NOT_FOUND, "Method not found")
+    if method == "tools/list":
+        return _tools_list(identifier, params, modern=True)
+    if method == "tools/call":
+        return _tools_call(identifier, params, modern=True)
+    return _error(identifier, METHOD_NOT_FOUND, "Method not found")
 
 
 def handle(message: object) -> dict | None:  # noqa: C901 - one branch per JSON-RPC method
@@ -121,23 +230,18 @@ def handle(message: object) -> dict | None:  # noqa: C901 - one branch per JSON-
                 "instructions": INSTRUCTIONS,
             },
         )
+    meta = _modern_meta(method, params)
+    if meta is not None:
+        return _handle_modern(identifier, method, params, meta)
+    if method == "server/discover":
+        # A modern method without modern _meta is a malformed request, not an unknown one.
+        return _error(identifier, INVALID_PARAMS, "Invalid params")
     if method == "ping":
         return _ok(identifier, {})
     if method == "tools/list":
-        if set(params) - {"cursor", "_meta"} or "cursor" in params:
-            # This server returns every tool in one page, so any cursor is invalid.
-            return _error(identifier, INVALID_PARAMS, "Invalid params")
-        return _ok(identifier, {"tools": TOOLS})
+        return _tools_list(identifier, params, modern=False)
     if method == "tools/call":
-        name, args = params.get("name"), params.get("arguments", {})
-        if args is None:
-            args = {}
-        if set(params) - {"name", "arguments", "_meta"} or not isinstance(name, str) or not isinstance(args, dict):
-            return _error(identifier, INVALID_PARAMS, "Invalid params")
-        if name not in TOOL_NAMES:
-            return _error(identifier, INVALID_PARAMS, f"Unknown tool: {name[:64]}")
-        structured, is_error = call_tool(name, args)
-        return _tool_result(identifier, structured, is_error)
+        return _tools_call(identifier, params, modern=False)
     return _error(identifier, METHOD_NOT_FOUND, "Method not found")
 
 
@@ -188,6 +292,26 @@ def _progress_token(message: dict) -> str | int | None:
     meta = params.get("_meta") if isinstance(params, dict) else None
     token = meta.get("progressToken") if isinstance(meta, dict) else None
     return token if type(token) in (str, int) else None
+
+
+def _request_version(message: object) -> str | None:
+    """The modern version this request carries in its own _meta, or None for a legacy request."""
+    if not isinstance(message, dict):
+        return None
+    params = message.get("params")
+    if not isinstance(params, dict):
+        return None
+    meta = _modern_meta(message.get("method"), params)
+    if meta is None:
+        return None
+    version = meta.get(PROTOCOL_VERSION_KEY)
+    return version if isinstance(version, str) else None
+
+
+def _progress_version(message: object, negotiated: str | None) -> str | None:
+    """Modern requests answer from their own _meta; legacy requests keep the process version."""
+    version = _request_version(message)
+    return negotiated if version is None else version
 
 
 def _progress_notification(token: str | int, event: dict, count: int, version: str | None) -> dict:
@@ -285,7 +409,7 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
                         and progress_count < nisi.MAX_PROGRESS_EVENTS
                     ):
                         progress_count += 1
-                        respond(_progress_notification(active[3], event, progress_count, negotiated_version))
+                        respond(_progress_notification(active[3], event, progress_count, active[4]))
                     continue
                 if kind == "done":
                     if not active[1].is_set():
@@ -346,7 +470,13 @@ def serve(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
             ):
                 cancel = threading.Event()
                 worker = threading.Thread(target=run, args=(message, cancel), name="agiw-mcp-nisi")
-                active = (message["id"], cancel, worker, _progress_token(message))
+                active = (
+                    message["id"],
+                    cancel,
+                    worker,
+                    _progress_token(message),
+                    _progress_version(message, negotiated_version),
+                )
                 progress_count = 0
                 worker.start()
             else:

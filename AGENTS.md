@@ -120,8 +120,19 @@ use the existing Mac runner (`mac-m5`); same-repo Windows jobs use the PC
 `SUPPORTED_PROTOCOLS` in `src/agiw_mcp/rpc.py` is `2025-11-25`, `2025-06-18`,
 `2025-03-26`, and `2024-11-05`, newest first. Initialize echoes a requested
 version when it is in that list. Any other version is answered with
-`2025-11-25`. Protocol `2026-07-28` is not implemented. OpenCode's default
-`legacy` handshake, through `2025-11-25`, is the handshake this server answers.
+`2025-11-25`. OpenCode's default `legacy` handshake, through `2025-11-25`, is
+answered unchanged.
+
+The server is dual-era. A request whose `params._meta` carries the
+`io.modelcontextprotocol/protocolVersion` key is answered statelessly as
+protocol `2026-07-28` (`MODERN_PROTOCOLS`) without an `initialize` first:
+`server/discover`, `tools/list`, and `tools/call` add `resultType`, the cache
+hints `ttlMs` and `cacheScope` where the revision requires them, and `_meta`
+server identity. Such a request must name `2026-07-28` and carry an
+`io.modelcontextprotocol/clientCapabilities` object; a missing or malformed
+field is `-32602`, and another version is `-32022`. `initialize` is always
+legacy. A request without the version key, including one that carries other
+`io.modelcontextprotocol/` keys such as `related-task`, gets its legacy frame.
 
 With no CLI arguments the process is the MCP server, and stdout carries only
 newline-delimited JSON-RPC frames. Diagnostics go to stderr and carry no

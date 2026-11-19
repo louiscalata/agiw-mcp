@@ -1,6 +1,6 @@
 # Next release notes
 
-These historical notes cover selected pull requests through #21 after tag `v0.1.0` (`f69630a`). They are not a complete list of changes on current main. See [CHANGELOG.md](../../CHANGELOG.md) for the current unreleased summary. The package version remains `0.1.0`.
+These historical notes cover selected pull requests through #21 after tag `v0.1.0` (`f69630a`). They are not a complete list of changes on current main. See [CHANGELOG.md](../../CHANGELOG.md) for the current unreleased summary and [current-main-draft.md](current-main-draft.md) for the pending notes, whose version is TBD. The package version remains `0.1.0`.
 
 - #1 keeps `SystemRoot`, `SYSTEMDRIVE`, and `WINDIR` in the Windows environment used to probe Node.
 - #2 brings the Mac working copy of config, keys, readiness, and Nisi response handling into this repo, with more tests.

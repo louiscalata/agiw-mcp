@@ -8,6 +8,8 @@ AGIW MCP is a local [Model Context Protocol](https://modelcontextprotocol.io) se
 
 **Status:** the `v0.1.0` tag and current main both report version `0.1.0`. The server needs Python 3.10 or newer. The optional syntax-check interpreter is configured separately. Node.js 22 or newer when a Nisi run needs it. CI runs on macOS, Linux, and Windows. Apache-2.0. Not published to PyPI.
 
+Unreleased changes since the tag are summarized in [CHANGELOG.md](CHANGELOG.md). The release-note draft for current main is [docs/release-notes/current-main-draft.md](docs/release-notes/current-main-draft.md); its version is TBD.
+
 ## Quick start
 
 ```bash
@@ -17,7 +19,7 @@ pipx install .
 agiw-mcp --version
 ```
 
-`agiw-mcp --version` prints `agiw-mcp 0.1.0`.
+`agiw-mcp --version` prints `agiw-mcp 0.1.0`. `agiw-mcp status` prints the full status JSON (versions, configuration and which prerequisites pass); the `agiw_status` tool returns the same report over MCP.
 
 The same checkout can be tried without installing it, or installed with uv:
 
@@ -42,6 +44,8 @@ The JSON has `"status": "NOT_READY"` and `"missing": {"id": "models", ...}`. Wit
 With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize request for protocol `2025-03-26`, then `tools/list`, returned server `agiw-mcp` `0.1.0` and these tools: `agiw_readiness`, `agiw_status`, `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, `agiw_nisi_run`.
 
 The legacy `initialize` handshake accepts `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
+
+The server is dual-era. A request whose `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key is answered as protocol `2026-07-28` without an `initialize` first: `server/discover`, `tools/list` and `tools/call` add `resultType`, the cache hints `ttlMs` and `cacheScope` where the revision requires them, and `_meta` server identity. A request with that key must name `2026-07-28` and carry an `io.modelcontextprotocol/clientCapabilities` object. `initialize` itself is always legacy, and a request without that key, including one that carries other `io.modelcontextprotocol/` keys such as `related-task`, is answered exactly as before.
 
 Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are in [Client setup](#client-setup).
 
@@ -68,16 +72,18 @@ monotonically increasing event count starting at 1; `total` is omitted. At
 most 64 events are forwarded, and events may be dropped if the internal queue
 is full. No progress is sent after cancellation or the result. The optional
 `message` is `<stage> attempt <n> <status>` for negotiated protocol
-`2025-03-26` or newer and is omitted for older protocols. There is no heartbeat
-between events. Notifications do not establish that a client displays them or
-extends its request timeout. Without a valid progress token, MCP stdout frames
-remain unchanged.
+`2025-03-26` or newer and is omitted for older protocols. A modern request
+takes the version from that request's `_meta`, so `message` is present without
+an `initialize`. There is no heartbeat between events. Notifications do not
+establish that a client displays them or extends its request timeout. Without
+a valid progress token, MCP stdout frames remain unchanged.
 
 ## What works, and what does not
 
 **Works**
 
 - The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
+- Dual-era MCP. Requests whose `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key are answered statelessly as protocol `2026-07-28`, and every legacy frame is unchanged.
 - An optional `check_python` interpreter for Nisi's Python syntax check.
 - Vendored Nisi v0.3.2, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text. An optional, default-off record of Nisi runs (`nisi_activity_log`) stores hashes, codes, time and counts.
@@ -88,7 +94,7 @@ remain unchanged.
 - PyPI. Install from git or from a checkout.
 - Ticket admission on Windows. CI runs the other unit tests there. Admission is still refused (`TICKET_UNSUPPORTED_PLATFORM`) before the ticket directory is touched. Runs without a ticket still work there unless `require_ticket` is true.
 - Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
-- OpenCode protocol `2026-07-28` is not implemented. OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is the one this server answers.
+- OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is still the handshake it uses; the modern path is tested in process, not with a real client.
 - A live request to TypeSafe is not part of the tests. `agiw_jev_pre` and `agiw_jev_post` refuse until consent is recorded and a key is available. CI uses a local fake for the success path.
 - Granting consent is not an OS user-presence check. Any same-user process that can write the config directory can change `consent.json`. This limit also applies to `v0.1.0`, whose README overstates the consent guarantee.
 - `COMPLETED` does not apply files. You do that yourself, after reading the proposal.
@@ -137,7 +143,7 @@ When configured, `reasoning_effort` (`none`, `low`, `medium` or `high`) is sent 
 }
 ```
 
-Other keys: `reviewer_base_url` (optional, same loopback rule; otherwise the reviewer uses `model_base_url`), `keychain_service` (default `agiw-mcp`), `keychain_account` (default `typesafe`), `jev_model` (default `jev-1.14.0`), `max_output_tokens` (default 4096), `reasoning_effort` (unset), `require_ticket` (default false), `allow_unsandboxed_nisi` (default false), `nisi_activity_log` (default false) and `check_python` (unset). `require_ticket: true` makes `agiw_nisi_run` refuse a request that has no claim ticket.
+Other keys: `reviewer_base_url` (optional, same loopback rule; otherwise the reviewer uses `model_base_url`), `keychain_service` (default `agiw-mcp`), `keychain_account` (default `typesafe`), `jev_model` (default `jev-1.14.0`; `jev-latest` is also accepted and skips the check that the served model matches the configured one), `max_output_tokens` (default 4096), `reasoning_effort` (unset), `require_ticket` (default false), `allow_unsandboxed_nisi` (default false), `nisi_activity_log` (default false) and `check_python` (unset). `require_ticket: true` makes `agiw_nisi_run` refuse a request that has no claim ticket.
 
 `check_python` is an optional absolute path to the Python interpreter used only for Nisi's Python syntax check. It must be a string of 1 to 1024 characters with no C0, DEL, or C1 control characters. Omit it to keep using the Python interpreter that runs agiw-mcp. `null` is invalid. The interpreter is probed for a strict `X.Y.Z` version after ticket admission and before temporary-directory creation, using fixed `-I -S -B` flags and a 3 second limit. The probe imposes no minimum Python version. A failed probe returns `CHECK_PYTHON_UNAVAILABLE` with a fixed message that does not include the path; a ticketed request releases its ticket. `agiw_status` includes `checkPython` with `path` in display form and `version`. When configured, readiness adds `syntax_python` after the Nisi check. The selected version is included in `pythonCheckerVersion` and the input fingerprint; the interpreter path is not part of the fingerprint. The path is not an environment override or a tool argument. Older builds reject this key as `CONFIG_INVALID`; remove it before downgrading.
 
@@ -258,7 +264,7 @@ droid mcp add agiw agiw-mcp
 }
 ```
 
-**OpenCode.** Current config puts each server under `mcp.servers` in `opencode.json` or `opencode.jsonc`. `type` is `local` and `command` is an array. `codemode` defaults to true; `false` leaves these six tools on the native tool list. `protocol` defaults to `legacy`, which uses `initialize` through `2025-11-25`.
+**OpenCode.** Current config puts each server under `mcp.servers` in `opencode.json` or `opencode.jsonc`. `type` is `local` and `command` is an array. `codemode` defaults to true; `false` leaves these six tools on the native tool list. `protocol` defaults to `legacy`, which uses `initialize` through `2025-11-25`. A modern client that sends `params._meta` with the `io.modelcontextprotocol/protocolVersion` key is answered as protocol `2026-07-28` by the same process.
 
 ```bash
 opencode mcp add agiw -- agiw-mcp
