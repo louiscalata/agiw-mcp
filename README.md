@@ -82,7 +82,7 @@ a valid progress token, MCP stdout frames remain unchanged.
 
 **Works**
 
-- The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12 and 3.13, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
+- The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12, 3.13 and 3.14, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
 - Dual-era MCP. Requests whose `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key are answered statelessly as protocol `2026-07-28`, and every legacy frame is unchanged.
 - An optional `check_python` interpreter for Nisi's Python syntax check.
 - Vendored Nisi v0.3.2, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
@@ -116,7 +116,7 @@ Readiness and key errors refer to the headings in this section. The blocks below
 
 ### Requirements and the local model server
 
-- Python 3.10 or newer.
+- Python 3.10 or newer. The floor is deliberate: macOS 12 Monterey's system Python 3.9 cannot run the server, so install a newer Python there first.
 - Node.js 22 or newer on the `PATH` of whatever starts `agiw-mcp`, when you use Nisi.
 - A local chat server that supports `response_format: {"type": "json_schema"}`, listening on loopback HTTP only.
 - Two different model IDs. By default, both must appear in `GET <model_base_url>/models`. If `reviewer_base_url` is set, the author must appear in the author server's list and the reviewer in the reviewer server's list. Nisi refuses a response whose `model` field differs.
