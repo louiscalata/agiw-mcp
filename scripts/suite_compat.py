@@ -6,7 +6,8 @@
 Usage: PYTHONPATH=src python3 scripts/suite_compat.py /path/to/agiw-suite
 
 AGIW Suite does not start agiw-mcp. The shared pieces are the vendored Nisi
-tree, the LICENSE bytes, and the Jev model and endpoint pin.
+tree, the LICENSE text (compared after normalizing CRLF to LF), and the Jev
+model and endpoint pin.
 """
 
 from __future__ import annotations
@@ -30,8 +31,13 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def _license_bytes(path: Path) -> bytes:
+    """LICENSE text with CRLF line endings normalized to LF."""
+    return path.read_bytes().replace(b"\r\n", b"\n")
+
+
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_license_bytes(path)).hexdigest()
 
 
 def _requires(path: Path) -> str:
@@ -58,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     mcp_license = _sha256(REPO / "LICENSE")
     suite_license = _sha256(suite / "LICENSE")
     if mcp_license != suite_license:
-        _fail("LICENSE bytes differ from agiw-suite")
+        _fail("LICENSE text differs from agiw-suite")
     try:
         nisi = verify_vendor(suite / "vendor" / "nisi")
     except NisiError as exc:
