@@ -116,7 +116,7 @@ Readiness and key errors refer to the headings in this section. The blocks below
 
 ### Requirements and the local model server
 
-- Python 3.10 or newer. The floor is deliberate: macOS 12 Monterey's system Python 3.9 cannot run the server, so install a newer Python there first.
+- Python 3.10 or newer. The floor is deliberate: macOS 12 Monterey's system Python 3.9 cannot run the server, so install a newer Python there first. How to confirm the package still works with AGIW Suite and Nisi on the M5, the Windows PC, and Monterey is in [docs/three-machine-readiness.md](docs/three-machine-readiness.md).
 - Node.js 22 or newer on the `PATH` of whatever starts `agiw-mcp`, when you use Nisi.
 - A local chat server that supports `response_format: {"type": "json_schema"}`, listening on loopback HTTP only.
 - Two different model IDs. By default, both must appear in `GET <model_base_url>/models`. If `reviewer_base_url` is set, the author must appear in the author server's list and the reviewer in the reviewer server's list. Nisi refuses a response whose `model` field differs.
