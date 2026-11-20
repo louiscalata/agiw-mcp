@@ -23,6 +23,8 @@ until a new release is assigned. Entries under Unreleased are not a new release.
 
 ### Fixed
 
+- `agiw_nisi_run` refuses arguments that are not an object, and refuses file paths that differ only by case or Unicode form, or where one path is a directory of another, with `INPUT_INVALID`, so two paths cannot name the same file on a case-insensitive or normalizing filesystem. (#82)
+- After a clean exit on macOS and Linux, the runner's process group is signalled only if its output pipes are still open after a 1 second grace, so a finished child is never signalled and a leftover grandchild cannot stall the run. (#81)
 - The opt-in Nisi activity record no longer stays blocked after a writer is killed. On macOS and Linux its lock is now a `flock` on an empty `nisi-activity.jsonl.lock` that is never removed, so the kernel releases it when the holder exits. Native Windows keeps an exclusive-create lock file that the writer removes. A failed rollback creates the marker `nisi-activity.jsonl.damaged`, and later calls skip the record while it exists. Each skipped record prints one fixed line to stderr with no request content. (#72)
 - Serialize Nisi activity rotation and append with a bounded exclusive lock and re-check the size under that lock. Concurrent writers no longer rotate a freshly created log over the retained backup. Roll back short writes so the next successful entry stays valid JSONL. Refuse hard-linked logs and symlinked config directories, preserve existing directory permissions, and record malformed repair counts or sandbox labels as null instead of silently dropping the whole entry. A lock or write failure still leaves the Nisi result unchanged. The current log and one previous log remain the retention limit.
 - Nisi runs work with an IPv6 loopback endpoint (`http://[::1]:<port>/...`). The host transport previously refused the bracketed hostname that Node returns. (#42)
@@ -38,7 +40,7 @@ until a new release is assigned. Entries under Unreleased are not a new release.
 - Correct the README and SECURITY limitations found by a public review: separate author and reviewer model servers, `reasoning_effort` omitted unless set, valid empty configuration, the tagged README's consent limit, and Windows CI coverage in CONTRIBUTING. The roadmap now lists release and validation work instead of session history. (#41)
 - SECURITY.md maps selected MCP security practices to this stdio server and preserves the same-user consent limit.
 - `docs/release-notes/next.md` preserves historical review notes through pull request #21; it is not a complete account of current main. The package version remains `0.2.0`.
-- `docs/release-notes/v0.2.0.md` is the release notes for `v0.2.0`, covering changes from tag `v0.1.0` (`f69630a`) through commit `2c3bfd3`, including the updates after `c14a0dd`.
+- `docs/release-notes/v0.2.0.md` is the release notes for `v0.2.0`, covering changes from tag `v0.1.0` (`f69630a`) through commit `c6fc38a`, including the updates after `c14a0dd`.
 - `docs/three-machine-readiness.md` records how to confirm the package still works with AGIW Suite and Nisi on the M5, the Windows PC, and Monterey. (#78)
 - The `suite-compat` check compares LICENSE text after CRLF normalization, so a Windows checkout that converts line endings still matches. (#79)
 - README client setup includes Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json` and `~/.cursor/mcp.json`).
