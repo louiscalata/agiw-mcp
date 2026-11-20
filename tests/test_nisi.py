@@ -261,7 +261,7 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
         self.assertEqual(state, "timeout")
 
     @unittest.skipUnless(os.name == "posix", "process groups are POSIX only")
-    def test_bounded_run_kills_orphaned_grandchild_after_normal_exit(self):
+    def test_bounded_run_sweeps_pipe_holding_grandchild_after_normal_exit(self):
         pid_file = self.tmp / "grandchild.pid"
         body = (
             "import subprocess, sys\n"
@@ -273,7 +273,7 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
         code, _out, state = nisi._bounded_run(
             [str(fake)], data=b"", cwd=str(self.tmp), env=dict(os.environ), timeout=10
         )
-        # Without the sweep, the grandchild holds the pipes open and the call blocks for its whole lifetime.
+        # The grandchild holds the pipes open; the run must not wait for it and must clean it up.
         self.assertLess(time.monotonic() - started, 10)
         self.assertEqual((code, state), (0, "exited"))
         pid = int(pid_file.read_text())
