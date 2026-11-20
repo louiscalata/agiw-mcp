@@ -6,9 +6,9 @@
 
 AGIW MCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server: a readiness check for this machine, optional consent-gated questions to TypeSafe's Jev model, and one Nisi run on file contents you supply.
 
-**Status:** the `v0.1.0` tag and current main both report version `0.1.0`. The server needs Python 3.10 or newer. The optional syntax-check interpreter is configured separately. Node.js 22 or newer when a Nisi run needs it. CI runs on macOS, Linux, and Windows. Apache-2.0. Not published to PyPI.
+**Status:** the latest published tag is `v0.2.0`, and current main reports version `0.2.0`. The server needs Python 3.10 or newer. The optional syntax-check interpreter is configured separately. Node.js 22 or newer when a Nisi run needs it. CI runs on macOS, Linux, and Windows. Apache-2.0. Not published to PyPI.
 
-Unreleased changes since the tag are summarized in [CHANGELOG.md](CHANGELOG.md). The release-note draft for current main is [docs/release-notes/current-main-draft.md](docs/release-notes/current-main-draft.md); its version is TBD.
+Changes since the previous tag are summarized in [CHANGELOG.md](CHANGELOG.md). The [v0.2.0 release notes](docs/release-notes/v0.2.0.md) cover this release.
 
 ## Quick start
 
@@ -19,7 +19,7 @@ pipx install .
 agiw-mcp --version
 ```
 
-`agiw-mcp --version` prints `agiw-mcp 0.1.0`. `agiw-mcp status` prints the full status JSON (versions, configuration and which prerequisites pass); the `agiw_status` tool returns the same report over MCP.
+`agiw-mcp --version` prints `agiw-mcp 0.2.0`. `agiw-mcp status` prints the full status JSON (versions, configuration and which prerequisites pass); the `agiw_status` tool returns the same report over MCP.
 
 The same checkout can be tried without installing it, or installed with uv:
 
@@ -28,10 +28,10 @@ uvx --from . agiw-mcp --version
 uv tool install .
 uv tool install "git+https://github.com/louiscalata/agiw-mcp"
 uv tool install "git+https://github.com/louiscalata/agiw-mcp@main"
-uv tool install "git+https://github.com/louiscalata/agiw-mcp@v0.1.0"
+uv tool install "git+https://github.com/louiscalata/agiw-mcp@v0.2.0"
 ```
 
-`uvx --from . agiw-mcp --version` prints `agiw-mcp 0.1.0`. Each `uv tool install` installs that same version, and `agiw-mcp --version` prints `agiw-mcp 0.1.0` afterwards. `@main` and the URL with no ref follow the default branch. `@v0.1.0` is the tag (`f69630a`) and does not include later commits. The version string is the same either way; the revision uv prints is the one that identifies the code.
+`uvx --from . agiw-mcp --version` prints `agiw-mcp 0.2.0`. Each `uv tool install` of this checkout, `@main`, or `@v0.2.0` installs that same version, and `agiw-mcp --version` prints `agiw-mcp 0.2.0` afterwards. `@main` and the URL with no ref follow the default branch. `@v0.2.0` is the current tag. `@v0.1.0` is the earlier tag (`f69630a`) and does not include later commits; that tag's version string is `0.1.0`.
 
 With no model ids configured, readiness exits 1 and does not start a server:
 
@@ -41,7 +41,7 @@ agiw-mcp readiness
 
 The JSON has `"status": "NOT_READY"` and `"missing": {"id": "models", ...}`. With Node 22 on `PATH` and no model ids, that is the first failed check. `READY` also needs two different model IDs. By default, both must appear in `GET <model_base_url>/models`. If `reviewer_base_url` is set, the author must appear in the author server's list and the reviewer in the reviewer server's list. See [Configuration file and environment variables](#configuration-file-and-environment-variables).
 
-With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize request for protocol `2025-03-26`, then `tools/list`, returned server `agiw-mcp` `0.1.0` and these tools: `agiw_readiness`, `agiw_status`, `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, `agiw_nisi_run`.
+With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize request for protocol `2025-03-26`, then `tools/list`, returned server `agiw-mcp` `0.2.0` and these tools: `agiw_readiness`, `agiw_status`, `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, `agiw_nisi_run`.
 
 The legacy `initialize` handshake accepts `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
 
@@ -90,8 +90,7 @@ a valid progress token, MCP stdout frames remain unchanged.
 
 **Does not, yet**
 
-- A release newer than `v0.1.0`. Main has later fixes and still reports `0.1.0`.
-- PyPI. Install from git or from a checkout.
+- PyPI. Install from git or from a checkout. The `v0.2.0` tag is a GitHub release.
 - Ticket admission on Windows. CI runs the other unit tests there. Admission is still refused (`TICKET_UNSUPPORTED_PLATFORM`) before the ticket directory is touched. Runs without a ticket still work there unless `require_ticket` is true.
 - Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
 - OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is still the handshake it uses; the modern path is tested in process, not with a real client.

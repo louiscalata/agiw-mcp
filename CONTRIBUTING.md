@@ -4,13 +4,13 @@ Issues and small pull requests are welcome. This repository has merged both. Kee
 
 ## Reports
 
-Open a [GitHub issue](https://github.com/louiscalata/agiw-mcp/issues) for a bug or for a README claim the code does not support. Include the command you ran, the exit code, and the JSON or text the program printed. Include the git revision (`agiw-mcp --version` prints `0.1.0` for every commit since the tag, so the revision matters).
+Open a [GitHub issue](https://github.com/louiscalata/agiw-mcp/issues) for a bug or for a README claim the code does not support. Include the command you ran, the exit code, and the JSON or text the program printed. Include the git revision (`agiw-mcp --version` prints `0.2.0` for every commit since the tag, so the revision matters).
 
 Do not include API keys, tokens, private host names, or machine addresses. A refusal code and the input shape are enough. If the report is a vulnerability, use the private advisory path in [SECURITY.md](SECURITY.md) instead of a public issue.
 
 ## Changes
 
-Branch from `main`. Do not commit secrets. Do not tag, publish a release, or bump the version past `0.1.0` unless the maintainer has assigned that release. The version string alone does not identify unreleased commits.
+Branch from `main`. Do not commit secrets. Do not tag, publish a release, or bump the version past `0.2.0` unless the maintainer has assigned that release. The version string alone does not identify unreleased commits.
 
 From a checkout:
 

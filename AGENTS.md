@@ -4,6 +4,7 @@ Guidance for coding agents using this repository. Start with
 [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [SECURITY.md](SECURITY.md). History and attribution:
 [CHANGELOG.md](CHANGELOG.md), [PROVENANCE.md](PROVENANCE.md),
+[docs/release-notes/v0.2.0.md](docs/release-notes/v0.2.0.md),
 [docs/release-notes/next.md](docs/release-notes/next.md).
 
 ## Overview
@@ -14,8 +15,8 @@ TypeSafe's Jev model, and can run one Nisi v0.3.2 workflow on file contents
 the caller supplies. The six tools are `agiw_readiness`, `agiw_status`,
 `agiw_consent`, `agiw_jev_pre`, `agiw_jev_post`, and `agiw_nisi_run`. Python
 3.10 or newer, standard library only. Node.js 22 or newer is required for a
-real Nisi run. Apache-2.0. Maintained by Louis Calata. The published tag and
-current main both report version `0.1.0`.
+real Nisi run. Apache-2.0. Maintained by Louis Calata. The latest published tag and
+current main both report version `0.2.0`.
 
 ## Ethos
 
@@ -97,13 +98,14 @@ use the existing Mac runner (`mac-m5`); same-repo Windows jobs use the PC
 - A `ToolError` is an MCP result with `isError`, not a JSON-RPC protocol
   error. Unknown `config.json` keys are refused. A model URL must be
   loopback HTTP: `http://127.0.0.1...` or `http://[::1]...`.
-- Leave `pyproject.toml` and `src/agiw_mcp/__init__.py` at version `0.1.0`
-  until a release is assigned. That string does not name later commits.
+- Leave `pyproject.toml` and `src/agiw_mcp/__init__.py` at version `0.2.0`
+  until a new release is assigned. That string does not name later commits.
 
 ## Hard rules
 
 - Do not create a git tag, a GitHub release, or a PyPI publication unless
-  Louis has said yes for that release. Do not bump the version past `0.1.0`.
+  Louis has said yes for that release. Do not bump the version past `0.2.0`
+  unless the maintainer assigns a release.
 - Never edit `AGIW.md`.
 - Do not record raw device identifiers in source, tests, docs, issues, or
   log lines. That includes a machine id, a host UUID, a hostname, a MAC

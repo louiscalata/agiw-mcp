@@ -1,6 +1,6 @@
 # Roadmap
 
-The latest release is `v0.1.0`. Main contains later fixes and still reports version `0.1.0`; see [CHANGELOG.md](CHANGELOG.md) and the [current-main release draft](docs/release-notes/current-main-draft.md), whose version is TBD.
+The latest release is `v0.2.0`. Main reports version `0.2.0`; see [CHANGELOG.md](CHANGELOG.md) and the [v0.2.0 release notes](docs/release-notes/v0.2.0.md).
 
 ## Next release
 
@@ -19,7 +19,7 @@ The latest release is `v0.1.0`. Main contains later fixes and still reports vers
 - [x] Hold the opt-in Nisi activity record's lock with `flock` on macOS and Linux, so a killed writer no longer blocks later records, and mark a failed rollback with `nisi-activity.jsonl.damaged` (#72).
 - [x] Test Python 3.14 in CI next to 3.10, 3.12 and 3.13 (#73).
 - [ ] Resolve the two remaining public-review findings: commit metadata in published history, and the private scrub definitions listed under Deferred work. Both need an owner decision.
-- [ ] Assign a version and publish a reviewed release containing the changes on main.
+- [x] Assign a version and publish a reviewed release containing the changes on main (`v0.2.0`, GitHub only, not PyPI).
 
 ## Validation
 
