@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Active documented versions agree with the package version.
 
-README.md, roadmap.md, CHANGELOG.md and current release notes state the version
-that current main reports. Tag numbers in release history, the vendored Nisi
-version and MCP protocol versions are not the package version.
+README.md, roadmap.md, CHANGELOG.md and the current release notes state the
+version that current main reports. Tag numbers in release history, the vendored
+Nisi version and MCP protocol versions are not the package version.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ DOCUMENTS = (
     "roadmap.md",
     "CHANGELOG.md",
     "docs/release-notes/next.md",
-    "docs/release-notes/current-main-draft.md",
+    "docs/release-notes/v0.2.0.md",
 )
 
 
@@ -116,13 +116,16 @@ class DocumentedVersionTests(unittest.TestCase):
                 )
 
     @unittest.skipUnless(
-        (ROOT / "docs/release-notes/current-main-draft.md").is_file(),
-        "the release note draft is not in an sdist",
+        (ROOT / "docs/release-notes/v0.2.0.md").is_file(),
+        "the v0.2.0 release notes are not in an sdist",
     )
-    def test_current_release_draft_leaves_the_release_number_to_the_maintainer(self):
-        text = (ROOT / "docs/release-notes/current-main-draft.md").read_text(encoding="utf-8")
-        self.assertIn("Version: TBD", text)
+    def test_v020_release_notes_name_the_assigned_version_and_commit_boundary(self):
+        text = (ROOT / "docs/release-notes/v0.2.0.md").read_text(encoding="utf-8")
+        self.assertIn("Version: 0.2.0", text)
+        self.assertNotIn("Version: TBD", text)
+        self.assertIn("f69630a", text)
         self.assertIn("c14a0dd", text)
+        self.assertIn("2c3bfd3", text)
 
 
 if __name__ == "__main__":
