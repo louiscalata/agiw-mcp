@@ -608,6 +608,14 @@ def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share o
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
+        if state == "exited" and os.name == "posix":
+            # Never signal a reaped child that finished cleanly. Only if a pipe is still held open after a short
+            # grace does a live group member exist (it keeps the pgid from being reused), so sweep it then.
+            grace = time.monotonic() + 1.0
+            for thread in threads[:2]:
+                thread.join(timeout=max(0.0, grace - time.monotonic()))
+            if any(thread.is_alive() for thread in threads[:2]):
+                _kill_tree(proc)
         for thread in threads:
             thread.join(timeout=5)
         for stream in (proc.stdout, proc.stderr):
