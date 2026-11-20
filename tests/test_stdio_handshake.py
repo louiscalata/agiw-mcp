@@ -1,5 +1,6 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
+import importlib.util
 import json
 import subprocess
 import sys
@@ -7,6 +8,10 @@ import sys
 from support import IsolatedTestCase, ROOT, subprocess_env
 
 from agiw_mcp import __version__
+
+_spec = importlib.util.spec_from_file_location("suite_compat", ROOT / "scripts" / "suite_compat.py")
+suite_compat = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(suite_compat)
 
 
 class StdioHandshakeTests(IsolatedTestCase):
@@ -54,3 +59,31 @@ class SuiteCompatScriptTests(IsolatedTestCase):
         )
         self.assertNotEqual(done.returncode, 0)
         self.assertIn(b"not an agiw-suite checkout", done.stderr)
+
+    def test_identical_lf_licenses_match(self):
+        text = b"Apache License\nVersion 2.0\nCopyright 2026\n"
+        mcp = self.tmp / "mcp-LICENSE"
+        suite = self.tmp / "suite-LICENSE"
+        mcp.write_bytes(text)
+        suite.write_bytes(text)
+        self.assertEqual(suite_compat._sha256(mcp), suite_compat._sha256(suite))
+
+    def test_crlf_suite_license_matches_lf(self):
+        lf = b"Apache License\nVersion 2.0\nCopyright 2026\n"
+        crlf = b"Apache License\r\nVersion 2.0\r\nCopyright 2026\r\n"
+        mcp = self.tmp / "mcp-LICENSE"
+        suite = self.tmp / "suite-LICENSE"
+        mcp.write_bytes(lf)
+        suite.write_bytes(crlf)
+        self.assertNotEqual(mcp.read_bytes(), suite.read_bytes())
+        self.assertEqual(suite_compat._sha256(mcp), suite_compat._sha256(suite))
+
+    def test_modified_license_text_still_differs(self):
+        lf = b"Apache License\nVersion 2.0\nCopyright 2026\n"
+        changed = b"Apache License\r\nVersion 2.0\r\nCopyright 2025\r\n"
+        mcp = self.tmp / "mcp-LICENSE"
+        suite = self.tmp / "suite-LICENSE"
+        mcp.write_bytes(lf)
+        suite.write_bytes(changed)
+        self.assertNotEqual(suite_compat._license_bytes(mcp), suite_compat._license_bytes(suite))
+        self.assertNotEqual(suite_compat._sha256(mcp), suite_compat._sha256(suite))
