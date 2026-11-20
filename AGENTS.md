@@ -69,7 +69,7 @@ use the existing Mac runner (`mac-m5`); same-repo Windows jobs use the PC
 
 - `lint`: Ruff 0.17.4, pinned. `ruff check` and `ruff format --check` on `src`,
   `tests`, and `scripts`.
-- `test`: Python 3.10, 3.12, and 3.13 with Node 22, plus Python 3.13 with
+- `test`: Python 3.10, 3.12, 3.13 and 3.14 with Node 22, plus Python 3.13 with
   Node 24, on Linux and macOS. Scrub, `compileall -q src`, and unit tests.
   `fail-fast` is false.
 - `python-only`: Python 3.12 with Node hidden, so the fake runner runs.
