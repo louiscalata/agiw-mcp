@@ -125,7 +125,7 @@ class DocumentedVersionTests(unittest.TestCase):
         self.assertNotIn("Version: TBD", text)
         self.assertIn("f69630a", text)
         self.assertIn("c14a0dd", text)
-        self.assertIn("2c3bfd3", text)
+        self.assertIn("c6fc38a", text)
 
 
 if __name__ == "__main__":
