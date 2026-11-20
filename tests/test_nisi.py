@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -258,6 +259,32 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
             [str(fake)], data=b"", cwd=str(self.tmp), env=dict(os.environ), timeout=0.5
         )
         self.assertEqual(state, "timeout")
+
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX only")
+    def test_bounded_run_sweeps_pipe_holding_grandchild_after_normal_exit(self):
+        pid_file = self.tmp / "grandchild.pid"
+        body = (
+            "import subprocess, sys\n"
+            f"p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+            f"open({str(pid_file)!r}, 'w').write(str(p.pid))\n"
+        )
+        fake = write_fake_node(self.tmp / "leaky", body)
+        started = time.monotonic()
+        code, _out, state = nisi._bounded_run(
+            [str(fake)], data=b"", cwd=str(self.tmp), env=dict(os.environ), timeout=10
+        )
+        # The grandchild holds the pipes open; the run must not wait for it and must clean it up.
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual((code, state), (0, "exited"))
+        pid = int(pid_file.read_text())
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.1)
+        os.kill(pid, 9)
+        self.fail("grandchild survived the run")
 
 
 @unittest.skipUnless(node_available(), "Node.js 22+ not available; FakeRunnerTests cover the Python side")

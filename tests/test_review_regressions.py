@@ -109,6 +109,26 @@ class ReviewRegressions(IsolatedTestCase):
             with self.subTest(valid=path):
                 self.assertTrue(nisi._path_ok(path))
 
+    def test_nisi_rejects_colliding_paths_and_non_object_args(self):
+        collisions = (
+            {"files": [{"path": "A.py", "content": "x"}, {"path": "a.py", "content": "y"}]},
+            {"files": [{"path": "a.py", "content": "x"}], "new_files": ["A.PY"]},
+            {"new_files": ["src", "src/a.py"]},
+            {"new_files": ["Src/a.py", "src/b.py", "SRC"]},
+        )
+        for extra in collisions:
+            with self.subTest(extra=extra):
+                with self.assertRaises(ToolError) as caught:
+                    nisi.validate_request({"task": "edit", **extra})
+                self.assertEqual(caught.exception.code, "INPUT_INVALID")
+        for bad in (None, [], "task", 5):
+            with self.subTest(args=bad):
+                with self.assertRaises(ToolError) as caught:
+                    nisi.validate_request(bad)
+                self.assertEqual(caught.exception.code, "INPUT_INVALID")
+        ok = nisi.validate_request({"task": "edit", "new_files": ["src/a.py", "src/b.py", "srcx/a.py", "a.py"]})
+        self.assertEqual(ok["allowed"], ["a.py", "src/a.py", "src/b.py", "srcx/a.py"])
+
     def test_python_checker_version_is_reported(self):
         request = nisi.validate_request({"task": "edit", "new_files": ["a.py"]})
         result = nisi._summarize({"report": {"outcome": "FAILED"}}, request, "none")

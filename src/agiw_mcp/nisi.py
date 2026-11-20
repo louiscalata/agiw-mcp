@@ -349,7 +349,19 @@ def _text(value, name: str, limit: int) -> str:
     return value
 
 
+def _paths_collide(paths: list[str]) -> bool:
+    """True when two paths name the same file, or one is a parent directory of another, on a
+    case-insensitive or normalizing filesystem."""
+    keys = [tickets.canonical_scope(p) for p in paths]
+    if len(set(keys)) != len(keys):
+        return True
+    taken = set(keys)
+    return any("/".join(k.split("/")[:i]) in taken for k in keys for i in range(1, k.count("/") + 1))
+
+
 def validate_request(args: dict) -> dict:  # noqa: C901 - one check per request field
+    if not isinstance(args, dict):
+        raise ToolError("INPUT_INVALID", "Arguments must be an object.")
     allowed_keys = {
         "task",
         "files",
@@ -400,6 +412,11 @@ def validate_request(args: dict) -> dict:  # noqa: C901 - one check per request 
     allowed = sorted(seen | set(new_files))
     if not allowed:
         raise ToolError("INPUT_INVALID", "Provide at least one file in files or one path in new_files.")
+    if _paths_collide(allowed):
+        raise ToolError(
+            "INPUT_INVALID",
+            "File paths must not differ only by case or Unicode form, and no path may be a directory of another.",
+        )
     criteria = args.get("acceptance_criteria", [])
     if not isinstance(criteria, list) or len(criteria) > MAX_CRITERIA:
         raise ToolError("INPUT_INVALID", f"acceptance_criteria must be a list of at most {MAX_CRITERIA} items.")
@@ -591,6 +608,14 @@ def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share o
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
+        if state == "exited" and os.name == "posix":
+            # Never signal a reaped child that finished cleanly. Only if a pipe is still held open after a short
+            # grace does a live group member exist (it keeps the pgid from being reused), so sweep it then.
+            grace = time.monotonic() + 1.0
+            for thread in threads[:2]:
+                thread.join(timeout=max(0.0, grace - time.monotonic()))
+            if any(thread.is_alive() for thread in threads[:2]):
+                _kill_tree(proc)
         for thread in threads:
             thread.join(timeout=5)
         for stream in (proc.stdout, proc.stderr):
