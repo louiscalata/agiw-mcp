@@ -585,7 +585,9 @@ def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share o
     except subprocess.TimeoutExpired:
         state, code = "timeout", None
     finally:
-        if state != "exited":
+        # On POSIX the child leads its own process group, so also sweep it after a normal exit: a grandchild
+        # left behind would otherwise outlive the run and keep the output pipes open.
+        if state != "exited" or os.name == "posix":
             _kill_tree(proc)
         try:
             proc.wait(timeout=5)
