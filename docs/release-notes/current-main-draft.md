@@ -6,7 +6,7 @@ version, create a tag, or publish a release.
 ## Scope and commit boundary
 
 The only published release is the `v0.1.0` tag at commit `f69630a`. This draft
-covers current main at commit `28efb69`, so it summarizes changes after
+covers current main at commit `c14a0dd`, so it summarizes changes after
 `f69630a` up to that commit. Later commits need a fresh check.
 
 Current main still reports `0.1.0`. That string does not identify this commit;
@@ -42,6 +42,17 @@ only, with Node.js 22 or newer for a real Nisi run. It is not published to PyPI.
   `progress` starts at 1 and has no `total`.
 - Independent readiness reporting for local prerequisites and Jev.
 - Explicit receipt fingerprints for host inputs and the final transport body.
+- Dual-era MCP. A request whose `params._meta` carries the
+  `io.modelcontextprotocol/protocolVersion` key is answered statelessly as
+  protocol `2026-07-28` without an `initialize` first (`server/discover`,
+  `tools/list` and `tools/call` add `resultType`, cache hints where required,
+  and `_meta` server identity). The modern path is taken only when that
+  protocol-version key is present; other `io.modelcontextprotocol/` keys, such
+  as `related-task`, keep the legacy frame. A modern request must name
+  `2026-07-28` and carry an `io.modelcontextprotocol/clientCapabilities`
+  object. `initialize` itself is always legacy. Gaps G1 to G6, G10 and G13 of
+  `docs/design/protocol-2026-07-28.md` are implemented; the other gaps stay
+  open.
 
 ### Changed
 
@@ -58,6 +69,8 @@ only, with Node.js 22 or newer for a real Nisi run. It is not published to PyPI.
   valid.
 - README and SECURITY text was corrected where it overstated the consent
   guarantee, described the model servers, or omitted client setup.
+- The vendored Nisi package is public Nisi 0.3.2, pinned by its manifest hash,
+  in place of 0.2.0. AGIW Suite main vendors the same bytes.
 
 ### Fixed
 
@@ -76,13 +89,20 @@ only, with Node.js 22 or newer for a real Nisi run. It is not published to PyPI.
 - The opt-in Nisi activity log serializes rotation and append, rolls back short
   writes, refuses hard links and symlinked config directories, and records
   malformed nullable metadata as null.
+- On macOS and Linux the opt-in Nisi activity log holds its lock with `flock`,
+  so a killed writer no longer blocks later records. A failed rollback is
+  marked with `nisi-activity.jsonl.damaged`.
 - Tracked HTTP sockets are closed on deadlines, and outstanding HTTP workers are
   capped.
 
 ## Compatibility and consent cautions
 
 - Python 3.10 or newer; Node.js 22 or newer for Nisi. Apache-2.0. No runtime
-  dependencies.
+  dependencies. macOS 12 Monterey's system Python 3.9 cannot run the server;
+  install Python 3.10 or newer there first.
+- CI runs the tests on macOS and Linux with Python 3.10, 3.12, 3.13 and 3.14
+  and Node 22, plus Python 3.13 with Node 24. Windows CI runs Python 3.12 and
+  Node 22.
 - Current main still reports `0.1.0` for every commit since the tag. Install
   from a checkout or git and record the revision; `agiw-mcp --version` alone
   does not identify the code.
@@ -108,8 +128,10 @@ only, with Node.js 22 or newer for a real Nisi run. It is not published to PyPI.
 - Ticket admission on Windows. It is refused as `TICKET_UNSUPPORTED_PLATFORM`
   before the ticket directory is touched. Runs without a ticket still work
   there unless `require_ticket` is true.
-- OpenCode protocol `2026-07-28`. The default `legacy` handshake through
-  `2025-11-25` is the one the server answers.
+- OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is
+  still the handshake that client uses. The modern `2026-07-28` path is tested
+  in process, not with a real client. Remaining gaps in
+  `docs/design/protocol-2026-07-28.md` stay open.
 - Reading or writing the caller's project, launching an MCP client, downloading
   models, or starting a local model server.
 - Applying proposed files or executing generated code.
@@ -118,18 +140,26 @@ only, with Node.js 22 or newer for a real Nisi run. It is not published to PyPI.
 
 ## Checks in this draft
 
-This draft was prepared by reading repository files only. No check below ran in
-this pass.
+Local checks below were run on the M5 from a checkout of `c14a0dd` plus this
+documentation update, with Python 3.12.13, Python 3.14.10, Node.js v24.22.2 and
+Ruff 0.17.4. No packages were installed for this pass.
 
-- `python3 scripts/scrub_check.py`: NOT_RUN
-- `python3 -m compileall -q src`: NOT_RUN
-- `ruff check src tests scripts`: NOT_RUN
-- `ruff format --check src tests scripts`: NOT_RUN
-- `PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v`: NOT_RUN
-- `python3 -m build`: NOT_RUN
+- `python3 scripts/scrub_check.py`: passed (Python 3.14.10)
+- `python3 -m compileall -q src`: passed (Python 3.14.10)
+- `ruff check src tests scripts`: passed (Ruff 0.17.4)
+- `ruff format --check src tests scripts`: passed (Ruff 0.17.4)
+- `PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -q`:
+  1568 tests OK on Python 3.12.13 and on Python 3.14.10
+- `PYTHONPATH=src python3 scripts/suite_compat.py <agiw-suite main>`: passed
+  against AGIW Suite `c104572` (Nisi 0.3.2, 22 files)
+- `python3 -m build`: NOT_RUN (the `build` module was not already installed;
+  no package was installed for this pass)
+- Python 3.10 and 3.13 unit tests on this machine: NOT_RUN (those versions are
+  not installed here; CI covers them)
 - CI, including the Linux, macOS, Windows, no-Node, distribution, git-install
-  and suite-compatibility jobs: NOT_RUN
+  and suite-compatibility jobs: NOT_RUN in this local pass
 - A live TypeSafe request, a real local model run, and launching Claude
   Desktop, Cursor, Claude Code, Factory or OpenCode: NOT_RUN
 
 The version remains TBD until the maintainer assigns it. This draft makes no
+release decision.

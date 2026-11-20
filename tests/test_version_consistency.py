@@ -122,7 +122,7 @@ class DocumentedVersionTests(unittest.TestCase):
     def test_current_release_draft_leaves_the_release_number_to_the_maintainer(self):
         text = (ROOT / "docs/release-notes/current-main-draft.md").read_text(encoding="utf-8")
         self.assertIn("Version: TBD", text)
-        self.assertIn("28efb69", text)
+        self.assertIn("c14a0dd", text)
 
 
 if __name__ == "__main__":
