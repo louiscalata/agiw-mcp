@@ -12,26 +12,29 @@ Changes since the previous tag are summarized in [CHANGELOG.md](CHANGELOG.md). T
 
 ## Quick start
 
+Install the `v0.2.0` GitHub release with one command, using [uv](https://docs.astral.sh/uv/) or pipx:
+
 ```bash
-git clone https://github.com/louiscalata/agiw-mcp.git
-cd agiw-mcp
-pipx install .
+uv tool install "git+https://github.com/louiscalata/agiw-mcp@v0.2.0"
+# or
+pipx install "git+https://github.com/louiscalata/agiw-mcp@v0.2.0"
+```
+
+Then check it:
+
+```bash
 agiw-mcp --version
+agiw-mcp status
 ```
 
 `agiw-mcp --version` prints `agiw-mcp 0.2.0`. `agiw-mcp status` prints the full status JSON (versions, configuration and which prerequisites pass); the `agiw_status` tool returns the same report over MCP.
 
-The same checkout can be tried without installing it, or installed with uv:
+Other ways to install:
 
-```bash
-uvx --from . agiw-mcp --version
-uv tool install .
-uv tool install "git+https://github.com/louiscalata/agiw-mcp"
-uv tool install "git+https://github.com/louiscalata/agiw-mcp@main"
-uv tool install "git+https://github.com/louiscalata/agiw-mcp@v0.2.0"
-```
-
-`uvx --from . agiw-mcp --version` prints `agiw-mcp 0.2.0`. Each `uv tool install` of this checkout, `@main`, or `@v0.2.0` installs that same version, and `agiw-mcp --version` prints `agiw-mcp 0.2.0` afterwards. `@main` and the URL with no ref follow the default branch. `@v0.2.0` is the current tag. `@v0.1.0` is the earlier tag (`f69630a`) and does not include later commits; that tag's version string is `0.1.0`.
+- Try it without installing: `uvx --from "git+https://github.com/louiscalata/agiw-mcp@v0.2.0" agiw-mcp --version`.
+- Follow the default branch: drop `@v0.2.0`, or use `@main`. Unreleased commits on main also print `0.2.0`, so the git revision identifies them.
+- From a clone: `git clone https://github.com/louiscalata/agiw-mcp.git`, then `pipx install .` or `uv tool install .` inside it.
+- The earlier `v0.1.0` tag (`f69630a`) does not include later commits; its version string is `0.1.0`.
 
 With no model ids configured, readiness exits 1 and does not start a server:
 
