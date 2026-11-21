@@ -19,6 +19,7 @@ The latest release is `v0.2.0`. Main reports version `0.2.0`; see [CHANGELOG.md]
 - [x] Vendor public Nisi 0.3.2 in place of 0.2.0, pinned by its manifest hash (#70).
 - [x] Hold the opt-in Nisi activity record's lock with `flock` on macOS and Linux, so a killed writer no longer blocks later records, and mark a failed rollback with `nisi-activity.jsonl.damaged` (#72).
 - [x] Serialize Jev activity-log rotation and append across processes with a bounded lock. CI exercised ordinary Jev logging through the Windows no-`fcntl` path. The cross-process contention regression uses POSIX `flock`, so Windows contention remains `NOT_RUN`.
+- [x] Refuse Jev activity-log symlink, hard-link and non-regular targets; create a missing log exclusively and verify the opened file before appending. Preserve the existing rotation threshold, JSON line shape and best-effort behavior. Regression tests cover static symlink/hard-link entries, a symlink swap before open, and a competing create after the absence check.
 - [x] Test Python 3.14 in CI next to 3.10, 3.12 and 3.13 (#73).
 - [ ] Resolve the two remaining public-review findings: commit metadata in published history, and the private scrub definitions listed under Deferred work. Both need an owner decision.
 - [x] Assign a version and publish a reviewed release containing the changes on main (`v0.2.0`, GitHub only, not PyPI).
@@ -28,6 +29,14 @@ The latest release is `v0.2.0`. Main reports version `0.2.0`; see [CHANGELOG.md]
 CI runs unit tests on Linux, macOS and Windows. Separate jobs check built distributions and a git install. Their installed smoke exercises stateless `2026-07-28` discovery and tool listing over stdio. The git install also checks the legacy handshake and uses MCP Inspector to verify the six tool names. Windows ticket admission remains unsupported. See the [workflow](.github/workflows/ci.yml) and [README](README.md#development).
 
 CI does not verify live TypeSafe requests or launch the supported MCP clients.
+
+### Local cleanup pass — 2026-11-21
+
+- Live main baseline: `3360028db6a2b84154d33b830864750896c54a0d`. In this candidate, `_record_jev_line` no longer follows a static symlink or appends through a hard link, and it does not open a regular file that appeared after the missing-path check. POSIX final-component opens use no-follow and nonblocking flags; opened type, link count, and existing-file identity are checked before the append.
+- Validation on the candidate: 1,582 unittest cases passed; `ruff check src tests scripts`, `ruff format --check src tests scripts` (59 files), `python3 -m compileall -q src`, `python3 scripts/scrub_check.py`, and `git diff --check` passed.
+- Daybreak Blue reviewed the exact focused diff read-only and found no actionable issue. Claude Fable 5.1 supplied a bounded design brainstorm before editing. Claude Sonnet source review is `NOT_RUN`: the local sensitive-input guard rejected the prepared excerpt before model invocation; it was not bypassed.
+- Same-user pathname substitution races are not fully eliminated by this high-level writer. The Jev log path checks and POSIX final-component flags narrow and detect observable replacement; native Windows race behavior is not verified. This boundary is now stated in SECURITY.md.
+- This remains an unreleased source correction with package version `0.2.0` unchanged. Required hosted CI must pass on the PR head before merge; no release or deployment is claimed.
 
 ## Deferred work
 

@@ -13,6 +13,7 @@ import select
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 from support import ROOT, IsolatedTestCase
 
@@ -92,6 +93,57 @@ class ActivityRotationTests(IsolatedTestCase):
             expected.append(activity.LOG_FILE + ".lock")
         self.assertEqual(sorted(path.name for path in self.config_dir.iterdir()), expected)
 
+    @unittest.skipUnless(os.name == "posix", "symlink protection uses POSIX no-follow flags")
+    def test_symlinked_jev_log_is_not_followed(self):
+        victim = self.config_dir / "victim.jsonl"
+        victim.write_bytes(b"leave unchanged\n")
+        self.log.symlink_to(victim)
+
+        self.assertFalse(activity.record(**ENTRY))
+        self.assertEqual(victim.read_bytes(), b"leave unchanged\n")
+        self.assertTrue(self.log.is_symlink())
+        self.assertFalse(self.previous.exists())
+
+    @unittest.skipUnless(os.name == "posix", "hard-link protection uses POSIX link counts")
+    def test_hard_linked_jev_log_is_not_written(self):
+        victim = self.config_dir / "victim.jsonl"
+        victim.write_bytes(b"leave unchanged\n")
+        os.link(victim, self.log)
+
+        self.assertFalse(activity.record(**ENTRY))
+        self.assertEqual(victim.read_bytes(), b"leave unchanged\n")
+        self.assertEqual(self.log.stat().st_nlink, 2)
+
+    @unittest.skipUnless(os.name == "posix", "symlink race protection uses POSIX no-follow flags")
+    def test_symlink_swap_before_open_does_not_write_the_target(self):
+        self.log.write_bytes(b"")
+        victim = self.config_dir / "victim.jsonl"
+        victim.write_bytes(b"leave unchanged\n")
+        real_open = os.open
+
+        def swap_before_open(path, flags, *args, **kwargs):
+            if os.fspath(path) == str(self.log):
+                self.log.unlink()
+                self.log.symlink_to(victim)
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(activity.os, "open", side_effect=swap_before_open):
+            self.assertFalse(activity.record(**ENTRY))
+        self.assertEqual(victim.read_bytes(), b"leave unchanged\n")
+        self.assertTrue(self.log.is_symlink())
+
+    def test_competing_file_creation_after_lstat_is_not_opened(self):
+        real_open = os.open
+
+        def create_before_exclusive_open(path, flags, *args, **kwargs):
+            if os.fspath(path) == str(self.log):
+                self.log.write_bytes(b"created by another writer")
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(activity.os, "open", side_effect=create_before_exclusive_open):
+            self.assertFalse(activity.record(**ENTRY))
+        self.assertEqual(self.log.read_bytes(), b"created by another writer")
+
     @unittest.skipIf(activity.fcntl is None or os.name != "posix", "flock is POSIX only")
     def test_cross_process_lock_serializes_rotation_and_open(self):
         old = self.fill(b"first", activity.MAX_LOG_BYTES + 1)
@@ -129,6 +181,13 @@ class ActivityRotationTests(IsolatedTestCase):
         text = " ".join((ROOT / "SECURITY.md").read_text(encoding="utf-8").split())
         self.assertIn(f"rotated when it exceeds {activity.MAX_LOG_BYTES // (1024 * 1024)} MiB", text)
         self.assertIn(activity.LOG_FILE + ".1", text)
+
+    @unittest.skipUnless((ROOT / "SECURITY.md").is_file(), "SECURITY.md is not in an sdist")
+    def test_security_md_states_jev_log_path_checks(self):
+        text = " ".join((ROOT / "SECURITY.md").read_text(encoding="utf-8").split())
+        self.assertIn("Jev writer checks the log path without following the final symlink", text)
+        self.assertIn("rejects a non-regular or hard-linked file", text)
+        self.assertIn("native Windows race behavior has not been verified", text)
 
 
 if __name__ == "__main__":
