@@ -774,6 +774,16 @@ def _admit_and_run(args: dict, request: dict, ticket: dict | None, config: Confi
         registry.release(admission["ticketId"])
 
 
+def _remove_workdir(workspace: tempfile.TemporaryDirectory, primary_error: BaseException | None) -> None:
+    try:
+        workspace.cleanup()
+    except OSError:
+        if primary_error is None:
+            raise ToolError("NISI_CLEANUP_FAILED", "The Nisi temporary workspace could not be removed.") from None
+        if isinstance(primary_error, ToolError):
+            primary_error.details["cleanupCode"] = "NISI_CLEANUP_FAILED"
+
+
 def _run_validated(request: dict, config: Config, temp_parent: str | None) -> dict:
     node, version = find_node()
     if not node or not version or version < MIN_NODE:
@@ -811,7 +821,9 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
         "checkTimeoutMs": 15000,
         "pythonVersion": python_version,
     }
-    workdir = tempfile.mkdtemp(prefix="agiw-mcp-nisi-", dir=temp_parent)
+    workspace = tempfile.TemporaryDirectory(prefix="agiw-mcp-nisi-", dir=temp_parent)
+    workdir = workspace.name
+    runner_finished = False
     try:
         if os.name == "posix":
             os.chmod(workdir, 0o700)
@@ -851,8 +863,11 @@ def _run_validated(request: dict, config: Config, temp_parent: str | None) -> di
         if state == "overflow":
             raise ToolError("NISI_OUTPUT_TOO_LARGE", "The Nisi runner produced too much output and was stopped.")
         result = _parse_output(raw, payload)
+        if code != 0:
+            raise ToolError("NISI_RUNNER_FAILED", "The Nisi runner returned a report without a successful exit.")
+        runner_finished = True
     finally:
-        shutil.rmtree(workdir, ignore_errors=True)
+        _remove_workdir(workspace, None if runner_finished else sys.exc_info()[1])
     return _summarize(result, request, sandbox, config.reasoning_effort, python_version)
 
 

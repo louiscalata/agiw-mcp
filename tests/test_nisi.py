@@ -143,13 +143,15 @@ report = {"outcome": "COMPLETED", "code": None, "candidate": {"files": files}, "
           "runId": "r", "taskFingerprint": "t", "candidateFingerprint": "c"}
 print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": {"author": [], "reviewer": []},
                   "syntax": {"calc.py": "PASS"}, "seenRequest": sorted(request)}))
+if MODE == "nonzero":
+    sys.exit(2)
 """
 
     # The same stand-in, but its help lists the stable permission flag, as Node 22.13+ and 24 do.
     FLAGGED_RUNNER = RUNNER.replace('"  --check  syntax check"', '"  --permission  enable the permission model"')
     ARGS = {"task": "Fix add", "files": [{"path": "calc.py", "content": BROKEN}]}
 
-    def run_with(self, mode, *, runner=None, **config):
+    def run_with(self, mode, *, runner=None, expect_clean=True, **config):
         fake = write_fake_node(self.tmp / "bin", (runner or self.RUNNER) % mode)
         self.write_config(author_model="author-model", reviewer_model="reviewer-model", **config)
         nisi._FLAG_CACHE.clear()
@@ -160,7 +162,27 @@ print(json.dumps({"kind": "agiw-mcp.nisi-run.v1", "report": report, "receipts": 
             try:
                 return nisi.run(dict(self.ARGS), load_config(), temp_parent=str(parent))
             finally:
-                self.assertEqual(os.listdir(parent), [], "temporary directory was not removed")
+                self.assertEqual(not os.listdir(parent), expect_clean, "unexpected temporary directory state")
+
+    def test_report_requires_successful_exit(self):
+        with self.assertRaises(ToolError) as ctx:
+            self.run_with("nonzero", allow_unsandboxed_nisi=True)
+        self.assertEqual(ctx.exception.code, "NISI_RUNNER_FAILED")
+        self.assertIn("successful exit", ctx.exception.message)
+
+    def test_cleanup_failure_overrides_success(self):
+        with mock.patch.object(nisi.shutil, "rmtree", side_effect=PermissionError("private runtime detail")):
+            with self.assertRaises(ToolError) as ctx:
+                self.run_with("ok", expect_clean=False, allow_unsandboxed_nisi=True)
+        self.assertEqual(ctx.exception.code, "NISI_CLEANUP_FAILED")
+        self.assertNotIn("private runtime detail", str(ctx.exception.payload()))
+
+    def test_cleanup_failure_preserves_runner_error(self):
+        with mock.patch.object(nisi.shutil, "rmtree", side_effect=PermissionError("private runtime detail")):
+            with self.assertRaises(ToolError) as ctx:
+                self.run_with("garbage", expect_clean=False, allow_unsandboxed_nisi=True)
+        self.assertEqual(ctx.exception.code, "NISI_RUNNER_FAILED")
+        self.assertEqual(ctx.exception.details, {"cleanupCode": "NISI_CLEANUP_FAILED"})
 
     def test_fake_runner_round_trip(self):
         result = self.run_with("ok", allow_unsandboxed_nisi=True)
