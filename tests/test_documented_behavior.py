@@ -9,6 +9,7 @@ MAX_LOG_BYTES keeping one previous file, as SECURITY.md says.
 
 import json
 import os
+import select
 import subprocess
 import sys
 import unittest
@@ -108,6 +109,8 @@ class ActivityRotationTests(IsolatedTestCase):
             stderr=subprocess.PIPE,
         )
         try:
+            ready, _, _ = select.select([process.stdout], [], [], 5)
+            self.assertTrue(ready, "activity lock holder did not report readiness")
             self.assertEqual(process.stdout.readline(), b"held\n")
             self.assertFalse(activity.record(**ENTRY))
             self.assertEqual(self.log.read_bytes(), old)
