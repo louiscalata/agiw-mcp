@@ -18,7 +18,7 @@ The latest release is `v0.2.0`. Main reports version `0.2.0`; see [CHANGELOG.md]
 - [x] Answer protocol `2026-07-28` statelessly alongside the unchanged legacy handshake: gaps G1 to G6, G10 and G13 of [docs/design/protocol-2026-07-28.md](docs/design/protocol-2026-07-28.md) (#68). The modern path is taken only when `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key (#71).
 - [x] Vendor public Nisi 0.3.2 in place of 0.2.0, pinned by its manifest hash (#70).
 - [x] Hold the opt-in Nisi activity record's lock with `flock` on macOS and Linux, so a killed writer no longer blocks later records, and mark a failed rollback with `nisi-activity.jsonl.damaged` (#72).
-- [x] Serialize Jev activity-log rotation and append across processes with a bounded lock. The forced no-`fcntl` fallback passed locally; native Windows execution remains `NOT_RUN`.
+- [x] Serialize Jev activity-log rotation and append across processes with a bounded lock. CI exercised ordinary Jev logging through the Windows no-`fcntl` path. The cross-process contention regression uses POSIX `flock`, so Windows contention remains `NOT_RUN`.
 - [x] Test Python 3.14 in CI next to 3.10, 3.12 and 3.13 (#73).
 - [ ] Resolve the two remaining public-review findings: commit metadata in published history, and the private scrub definitions listed under Deferred work. Both need an owner decision.
 - [x] Assign a version and publish a reviewed release containing the changes on main (`v0.2.0`, GitHub only, not PyPI).
