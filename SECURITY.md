@@ -227,6 +227,13 @@ the write; an interrupted writer can leave it behind for manual removal after
 all writers have stopped. Lock contention or an unusable lock skips that record
 without failing the Jev call.
 
+Before rotation or append, the Jev writer checks the log path without following
+the final symlink and rejects a non-regular or hard-linked file. It opens a new
+log exclusively and verifies the opened file before writing. The POSIX open
+also uses no-follow and nonblocking flags. These checks detect static and
+observable replacements; they do not eliminate every same-user path
+replacement race, and native Windows race behavior has not been verified.
+
 `nisi-activity.jsonl` is a second, optional record. It is off by default and
 is written only when `config.json` sets `nisi_activity_log` to `true`; no
 environment variable or tool argument turns it on. When on, each

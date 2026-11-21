@@ -155,18 +155,39 @@ def _record_jev_line(directory: Path, line: str) -> bool:
     ensure_private_dir(directory)
     path = directory / LOG_FILE
     lock_path = directory / (LOG_FILE + ".lock")
+    previous = directory / (LOG_FILE + ".1")
     persistent = fcntl is not None and os.name == "posix"
     lock_fd = _take_flock(str(lock_path), {}) if persistent else _take_lock(str(lock_path), {})
     if lock_fd is None:
         return False
     try:
         try:
-            if path.stat().st_size > MAX_LOG_BYTES:
-                os.replace(path, directory / (LOG_FILE + ".1"))
+            info = os.lstat(path)
         except FileNotFoundError:
-            pass
-        fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as handle:
+            info = None
+        if info is not None and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
+            return False
+        if info is not None and info.st_size > MAX_LOG_BYTES:
+            os.replace(path, previous)
+            info = None
+
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+        if info is None:
+            flags |= os.O_EXCL
+        if os.name == "posix":
+            flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(str(path), flags, 0o600)
+        try:
+            handle = os.fdopen(fd, "a", encoding="utf-8")
+        except BaseException:
+            _close_quietly(fd)
+            raise
+        with handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                return False
+            if info is not None and (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                return False
             handle.write(line)
         return True
     finally:
