@@ -219,7 +219,13 @@ milliseconds (`elapsedMs`). It never contains the text or the key. New logs are
 created with mode 0600 on macOS and Linux; an existing log keeps its mode.
 The log is rotated when it exceeds 1 MiB: the next write renames it to
 `jev-activity.jsonl.1` (keeping its mode), replacing any earlier `.1`, and starts a
-new log, so only the current and one previous file are kept.
+new log, so only the current and one previous file are kept. Rotation and append
+hold the same bounded exclusive lock. On macOS and Linux, the persistent
+`jev-activity.jsonl.lock` uses `flock`, so the kernel releases the lock when a
+writer exits. Without `fcntl`, an exclusive-create lock file is removed after
+the write; an interrupted writer can leave it behind for manual removal after
+all writers have stopped. Lock contention or an unusable lock skips that record
+without failing the Jev call.
 
 `nisi-activity.jsonl` is a second, optional record. It is off by default and
 is written only when `config.json` sets `nisi_activity_log` to `true`; no

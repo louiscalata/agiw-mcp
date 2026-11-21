@@ -10,9 +10,9 @@ when config.json sets nisi_activity_log to true; the caller decides, this module
 that is not on the allowlist. Both rotate to a single ".1" file above MAX_LOG_BYTES. The Nisi log is
 opened without following a symlink and only if it is a regular file.
 
-On POSIX the Nisi writer serializes with flock on a persistent nisi-activity.jsonl.lock that is never
-removed, so a killed writer cannot wedge the record. Without fcntl it falls back to an exclusive-create lock
-file. A failed rollback creates nisi-activity.jsonl.damaged; while it exists no line is written.
+On POSIX each writer serializes rotation and append with flock on its own persistent lock file, so a killed
+writer cannot wedge the record. Without fcntl it falls back to an exclusive-create lock file. A failed Nisi
+rollback creates nisi-activity.jsonl.damaged; while it exists no Nisi line is written.
 """
 
 from __future__ import annotations
@@ -37,8 +37,8 @@ LOG_FILE = "jev-activity.jsonl"
 NISI_LOG_FILE = "nisi-activity.jsonl"
 NISI_DAMAGED_SUFFIX = ".damaged"
 MAX_LOG_BYTES = 1024 * 1024
-_NISI_LOCK_ATTEMPTS = 20
-_NISI_LOCK_DELAY = 0.005
+_LOCK_ATTEMPTS = 20
+_LOCK_DELAY = 0.005
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _CODE = re.compile(r"[A-Z0-9_]{1,64}\Z")
 _VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
@@ -83,18 +83,8 @@ def record(**fields) -> bool:
     if entry is None:
         return False
     try:
-        directory = config_dir()
-        ensure_private_dir(directory)
-        path = directory / LOG_FILE
-        try:
-            if path.stat().st_size > MAX_LOG_BYTES:
-                os.replace(path, directory / (LOG_FILE + ".1"))
-        except FileNotFoundError:
-            pass
-        fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n")
-        return True
+        line = json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n"
+        return _record_jev_line(config_dir(), line)
     except (OSError, ValueError):
         return False
 
@@ -119,7 +109,7 @@ def _prepare_nisi_directory(directory: Path) -> os.stat_result:
     return info
 
 
-def _take_nisi_flock(path: str, kwargs: dict[str, int]) -> int | None:
+def _take_flock(path: str, kwargs: dict[str, int]) -> int | None:
     """Lock the persistent lock file with flock; the kernel releases it when the holder exits or closes it."""
     flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
     fd = os.open(path, flags, 0o600, **kwargs)
@@ -127,13 +117,13 @@ def _take_nisi_flock(path: str, kwargs: dict[str, int]) -> int | None:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise OSError("The activity lock is not a regular file.")
-        for attempt in range(_NISI_LOCK_ATTEMPTS):
+        for attempt in range(_LOCK_ATTEMPTS):
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return fd
             except BlockingIOError:
-                if attempt + 1 < _NISI_LOCK_ATTEMPTS:
-                    time.sleep(_NISI_LOCK_DELAY)
+                if attempt + 1 < _LOCK_ATTEMPTS:
+                    time.sleep(_LOCK_DELAY)
     except BaseException:
         _close_quietly(fd)
         raise
@@ -141,15 +131,15 @@ def _take_nisi_flock(path: str, kwargs: dict[str, int]) -> int | None:
     return None
 
 
-def _take_nisi_lock(path: str, kwargs: dict[str, int]) -> int | None:
+def _take_lock(path: str, kwargs: dict[str, int]) -> int | None:
     """Fallback without fcntl: an exclusive-create lock file that the holder removes by name."""
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    for attempt in range(_NISI_LOCK_ATTEMPTS):
+    for attempt in range(_LOCK_ATTEMPTS):
         try:
             return os.open(path, flags, 0o600, **kwargs)
         except FileExistsError:
-            if attempt + 1 < _NISI_LOCK_ATTEMPTS:
-                time.sleep(_NISI_LOCK_DELAY)
+            if attempt + 1 < _LOCK_ATTEMPTS:
+                time.sleep(_LOCK_DELAY)
     return None
 
 
@@ -158,6 +148,34 @@ def _close_quietly(fd: int) -> None:
         os.close(fd)
     except OSError:
         pass
+
+
+def _record_jev_line(directory: Path, line: str) -> bool:
+    """Serialize Jev rotation and append across participating processes."""
+    ensure_private_dir(directory)
+    path = directory / LOG_FILE
+    lock_path = directory / (LOG_FILE + ".lock")
+    persistent = fcntl is not None and os.name == "posix"
+    lock_fd = _take_flock(str(lock_path), {}) if persistent else _take_lock(str(lock_path), {})
+    if lock_fd is None:
+        return False
+    try:
+        try:
+            if path.stat().st_size > MAX_LOG_BYTES:
+                os.replace(path, directory / (LOG_FILE + ".1"))
+        except FileNotFoundError:
+            pass
+        fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
+            handle.write(line)
+        return True
+    finally:
+        _close_quietly(lock_fd)
+        if not persistent:
+            try:
+                os.unlink(lock_path)
+            except OSError:
+                pass
 
 
 def _mark_nisi_damaged(path: str, kwargs: dict[str, int]) -> bool:
@@ -230,7 +248,7 @@ def _record_nisi_line(directory: Path, line: bytes) -> str:
         lock_path = path + ".lock"
         damaged_path = path + NISI_DAMAGED_SUFFIX
         persistent = fcntl is not None and bool(kwargs)
-        lock_fd = _take_nisi_flock(lock_path, kwargs) if persistent else _take_nisi_lock(lock_path, kwargs)
+        lock_fd = _take_flock(lock_path, kwargs) if persistent else _take_lock(lock_path, kwargs)
         if lock_fd is None:
             return "locked"
         remove_lock = not persistent
