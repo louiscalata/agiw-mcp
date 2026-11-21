@@ -151,8 +151,6 @@ def verify_vendor(root: Path | None = None) -> dict:
         for name, digest in manifest["files"].items():
             if hashlib.sha256(_regular_bytes(root / "package" / name)).hexdigest() != digest:
                 raise NisiError("NISI_HASH_MISMATCH")
-    except NisiError:
-        raise
     except (OSError, ValueError, UnicodeError):
         raise NisiError("NISI_UNREADABLE") from None
     return {
