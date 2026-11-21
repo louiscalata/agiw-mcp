@@ -23,7 +23,7 @@ The latest release is `v0.2.0`. Main reports version `0.2.0`; see [CHANGELOG.md]
 
 ## Validation
 
-CI runs unit tests on Linux, macOS and Windows. Separate jobs check built distributions and a git install, and MCP Inspector `tools/list` checks the six tool names. Windows ticket admission remains unsupported. See the [workflow](.github/workflows/ci.yml) and [README](README.md#development).
+CI runs unit tests on Linux, macOS and Windows. Separate jobs check built distributions and a git install. Their installed smoke exercises stateless `2026-07-28` discovery and tool listing over stdio. The git install also checks the legacy handshake and uses MCP Inspector to verify the six tool names. Windows ticket admission remains unsupported. See the [workflow](.github/workflows/ci.yml) and [README](README.md#development).
 
 CI does not verify live TypeSafe requests or launch the supported MCP clients.
 

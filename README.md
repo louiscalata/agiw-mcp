@@ -96,7 +96,7 @@ a valid progress token, MCP stdout frames remain unchanged.
 - PyPI. Install from git or from a checkout. The `v0.2.0` tag is a GitHub release.
 - Ticket admission on Windows. CI runs the other unit tests there. Admission is still refused (`TICKET_UNSUPPORTED_PLATFORM`) before the ticket directory is touched. Runs without a ticket still work there unless `require_ticket` is true.
 - Readiness does not download models, start LM Studio, or open an MCP client. Claude Desktop, Cursor, Claude Code, Factory and OpenCode are not launched by these tests.
-- OpenCode's default `legacy` handshake, through protocol `2025-11-25`, is still the handshake it uses; the modern path is tested in process, not with a real client.
+- OpenCode defaults to the `legacy` handshake, through protocol `2025-11-25`. The installed-package smoke checks modern discovery and tool listing over stdio without `initialize`. It does not launch OpenCode or any other MCP client.
 - A live request to TypeSafe is not part of the tests. `agiw_jev_pre` and `agiw_jev_post` refuse until consent is recorded and a key is available. CI uses a local fake for the success path.
 - Granting consent is not an OS user-presence check. Any same-user process that can write the config directory can change `consent.json`. This limit also applies to `v0.1.0`, whose README overstates the consent guarantee.
 - `COMPLETED` does not apply files. You do that yourself, after reading the proposal.
