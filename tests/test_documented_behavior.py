@@ -9,6 +9,8 @@ MAX_LOG_BYTES keeping one previous file, as SECURITY.md says.
 
 import json
 import os
+import subprocess
+import sys
 import unittest
 
 from support import ROOT, IsolatedTestCase
@@ -51,6 +53,7 @@ class ActivityRotationTests(IsolatedTestCase):
         self.config_dir.mkdir(parents=True)
         self.log = self.config_dir / activity.LOG_FILE
         self.previous = self.config_dir / (activity.LOG_FILE + ".1")
+        self.lock = self.config_dir / (activity.LOG_FILE + ".lock")
 
     def fill(self, marker: bytes, size: int) -> bytes:
         data = marker + b"x" * (size - len(marker))
@@ -83,9 +86,40 @@ class ActivityRotationTests(IsolatedTestCase):
         self.assertTrue(activity.record(**ENTRY))
         self.assertEqual(self.previous.read_bytes(), second)
         self.assertEqual(len(self.lines()), 1)
-        self.assertEqual(
-            sorted(path.name for path in self.config_dir.iterdir()), [activity.LOG_FILE, activity.LOG_FILE + ".1"]
+        expected = [activity.LOG_FILE, activity.LOG_FILE + ".1"]
+        if activity.fcntl is not None and os.name == "posix":
+            expected.append(activity.LOG_FILE + ".lock")
+        self.assertEqual(sorted(path.name for path in self.config_dir.iterdir()), expected)
+
+    @unittest.skipIf(activity.fcntl is None or os.name != "posix", "flock is POSIX only")
+    def test_cross_process_lock_serializes_rotation_and_open(self):
+        old = self.fill(b"first", activity.MAX_LOG_BYTES + 1)
+        script = (
+            "import fcntl, os, sys\n"
+            "fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT, 0o600)\n"
+            "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+            "print('held', flush=True)\n"
+            "sys.stdin.read()\n"
         )
+        process = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c", script, str(self.lock)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            self.assertEqual(process.stdout.readline(), b"held\n")
+            self.assertFalse(activity.record(**ENTRY))
+            self.assertEqual(self.log.read_bytes(), old)
+            self.assertFalse(self.previous.exists())
+        finally:
+            process.stdin.close()
+            process.wait(timeout=15)
+            process.stdout.close()
+            process.stderr.close()
+        self.assertTrue(activity.record(**ENTRY))
+        self.assertEqual(self.previous.read_bytes(), old)
+        self.assertEqual(len(self.lines()), 1)
 
     @unittest.skipUnless((ROOT / "SECURITY.md").is_file(), "SECURITY.md is not in an sdist")
     def test_security_md_states_the_rotation(self):
