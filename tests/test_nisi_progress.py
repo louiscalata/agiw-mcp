@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -133,6 +134,23 @@ class NisiProgressTests(IsolatedTestCase):
                 code, raw, state = self.child(output)
                 self.assertEqual((code, state), (0, "exited"))
                 self.assertEqual(nisi._parse_output(raw, {}), RESULT)
+
+    def test_completed_report_requires_stdout_to_reach_eof(self):
+        for error in (OSError, ValueError):
+            with self.subTest(error=error):
+                stdout = mock.Mock()
+                stdout.read1.side_effect = [line(RESULT), error("stdout read failed")]
+                proc = mock.Mock(stdin=io.BytesIO(), stdout=stdout, stderr=io.BytesIO())
+                proc.wait.return_value = 0
+                with (
+                    mock.patch.object(nisi.subprocess, "Popen", return_value=proc),
+                    self.assertRaises(ToolError) as caught,
+                ):
+                    nisi._bounded_run(["runner"], data=b"", cwd=str(self.tmp), env={}, timeout=5)
+                self.assertEqual(caught.exception.code, "NISI_RUNNER_FAILED")
+                stdout.close.assert_called_once_with()
+                self.assertTrue(proc.stdin.closed)
+                self.assertTrue(proc.stderr.closed)
 
     def test_split_event_and_unterminated_result_are_read(self):
         events = []

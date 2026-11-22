@@ -538,6 +538,7 @@ def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share o
     )
     out = bytearray()
     overflow = threading.Event()
+    stdout_eof = threading.Event()
     # Capture the worker's thread-local context here; the pipe reader has its own thread locals.
     progress = getattr(_CANCEL, "progress", None)
     runner_events = _RunnerEvents(progress, getattr(_CANCEL, "event", None)) if progress is not None else None
@@ -549,8 +550,10 @@ def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share o
                 # read1 returns available pipe bytes instead of waiting for a full 64 KiB buffer.
                 chunk = stream.read1(65536)
                 if not chunk:
-                    if keep and runner_events is not None:
-                        runner_events.feed(b"", eof=True)
+                    if keep:
+                        stdout_eof.set()
+                        if runner_events is not None:
+                            runner_events.feed(b"", eof=True)
                     break
                 size += len(chunk)
                 if size > cap:
@@ -623,6 +626,8 @@ def _bounded_run(  # noqa: C901 - deadline, output caps and cancellation share o
                 pass
     if overflow.is_set():
         state = "overflow"
+    elif code == 0 and not stdout_eof.is_set():
+        raise ToolError("NISI_RUNNER_FAILED", "The Nisi runner's output could not be read completely.")
     return code, bytes(out), state
 
 
