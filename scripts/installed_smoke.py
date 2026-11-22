@@ -26,7 +26,12 @@ with tempfile.TemporaryDirectory() as directory:
         for key, value in os.environ.items()
         if key in ("PATH", "SYSTEMROOT", "WINDIR", "TMPDIR", "TEMP", "TMP")
     }
-    env.update(AGIW_MCP_CONFIG_DIR=directory, AGIW_MCP_TEST_MODE="1", PYTHONDONTWRITEBYTECODE="1")
+    env.update(
+        AGIW_MCP_CONFIG_DIR=directory,
+        AGIW_MCP_TEST_MODE="1",
+        PYTHONDONTWRITEBYTECODE="1",
+        PYTHONWARNINGS="error",
+    )
     command = str(Path(sys.executable).parent / "agiw-mcp")
     version = subprocess.run([command, "--version"], env=env, capture_output=True, check=True, timeout=10)
     assert version.stdout.decode().strip() == f"agiw-mcp {agiw_mcp.__version__}"
