@@ -48,6 +48,8 @@ With no arguments, `agiw-mcp` speaks MCP on stdin and stdout. An initialize requ
 
 The legacy `initialize` handshake accepts `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
 
+After negotiating `2025-03-26`, the stdio server accepts [JSON-RPC batches](https://modelcontextprotocol.io/specification/2025-03-26/basic#batching). Each admitted batch finishes with one response array when any members have replies. Valid notifications produce no reply. Send `initialize` as a separate message. Other versions use single-message framing. Before dispatch, the server reserves room for per-member errors within its 16 MiB response limit. If that reservation exceeds the limit, it returns a resource error for the batch.
+
 The server is dual-era. A request whose `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key is answered as protocol `2026-07-28` without an `initialize` first: `server/discover`, `tools/list` and `tools/call` add `resultType`, the cache hints `ttlMs` and `cacheScope` where the revision requires them, and `_meta` server identity. A request with that key must name `2026-07-28` and carry an `io.modelcontextprotocol/clientCapabilities` object. `initialize` itself is always legacy, and a request without that key, including one that carries other `io.modelcontextprotocol/` keys such as `related-task`, is answered exactly as before.
 
 Config files for Claude Desktop, Cursor, Claude Code, Factory and OpenCode are in [Client setup](#client-setup).
@@ -86,7 +88,7 @@ a valid progress token, MCP stdout frames remain unchanged.
 **Works**
 
 - The six tools above, on Python 3.10+. CI runs the tests on macOS and Linux with Python 3.10, 3.12, 3.13 and 3.14, and Node 22 and 24. Windows CI runs Python 3.12 and Node 22, and skips the ticket-admission tests.
-- Dual-era MCP. Requests whose `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key are answered statelessly as protocol `2026-07-28`, and every legacy frame is unchanged.
+- Dual-era MCP. Requests whose `params._meta` carries the `io.modelcontextprotocol/protocolVersion` key are answered statelessly as protocol `2026-07-28`. Legacy single-message requests retain their response format.
 - An optional `check_python` interpreter for Nisi's Python syntax check.
 - Vendored Nisi v0.3.2, checked against its manifest before a run. The same bytes are in [AGIW Suite](https://github.com/louiscalata/agiw-suite) main. Suite does not launch this server. Both use Jev model `jev-1.14.0` and `https://api.typesafe.ai/v1/systemone`. Suite's command-line package allows Python 3.9; this server does not.
 - No telemetry. The Jev activity log stores hashes, sizes and outcome codes, not your text. An optional, default-off record of Nisi runs (`nisi_activity_log`) stores hashes, codes, time and counts.

@@ -235,18 +235,89 @@ def _valid_id(identifier) -> bool:
     return False
 
 
-def encode(message: dict) -> bytes:
+def _encoded(message: object) -> bytes:
     try:
         raw = json.dumps(message, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode("ascii")
     except (TypeError, ValueError):
-        raw = json.dumps(_error(message.get("id"), INTERNAL_ERROR, "Internal error"), separators=(",", ":")).encode(
-            "ascii"
-        )
+        raise ValueError("unencodable response") from None
+    return raw
+
+
+def encode(message: dict) -> bytes:
+    try:
+        raw = _encoded(message)
+    except ValueError:
+        raw = _encoded(_error(message.get("id"), INTERNAL_ERROR, "Internal error"))
     if len(raw) > MAX_OUTPUT_BYTES:
-        raw = json.dumps(_error(message.get("id"), INTERNAL_ERROR, "Response too large"), separators=(",", ":")).encode(
-            "ascii"
-        )
+        raw = _encoded(_error(message.get("id"), INTERNAL_ERROR, "Response too large"))
     return raw + b"\n"
+
+
+def _expects_reply(message: object) -> bool:
+    if not isinstance(message, dict):
+        return True
+    if message.get("jsonrpc") != "2.0":
+        return True
+    if "method" not in message:
+        return True
+    method = message.get("method")
+    if not isinstance(method, str) or set(message) - {"jsonrpc", "id", "method", "params"}:
+        return True
+    return "id" in message
+
+
+def _reply_identifier(message: object):
+    if not isinstance(message, dict):
+        return None
+    identifier = message.get("id")
+    return identifier if _valid_id(identifier) else None
+
+
+def _batch_fallback(message: object) -> dict:
+    return _error(_reply_identifier(message), INTERNAL_ERROR, "Response too large")
+
+
+class _Batch:
+    def __init__(self, members: list) -> None:
+        self.members = members
+        self.cursor = 0
+        self.slots = {
+            index: _encoded(_batch_fallback(member)) for index, member in enumerate(members) if _expects_reply(member)
+        }
+        self.remaining = sum(len(fallback) + 1 for fallback in self.slots.values())
+        self.used = 1
+        self.encoded = []
+
+    def reserve_size(self) -> int:
+        return self.used + self.remaining
+
+    def complete(self, index: int, reply: dict) -> None:
+        fallback = self.slots.pop(index)
+        self.remaining -= len(fallback) + 1
+        try:
+            actual = _encoded(reply)
+        except ValueError:
+            actual = _encoded(_error(_reply_identifier(self.members[index]), INTERNAL_ERROR, "Internal error"))
+        if self.used + len(actual) + 1 + self.remaining > MAX_OUTPUT_BYTES:
+            actual = fallback
+        self.encoded.append(actual)
+        self.used += len(actual) + 1
+
+    def cancel(self, identifier) -> None:
+        for index, fallback in tuple(self.slots.items()):
+            member = self.members[index]
+            if index >= self.cursor and isinstance(member, dict) and _same_id(member.get("id"), identifier):
+                self.remaining -= len(fallback) + 1
+                del self.slots[index]
+
+    def cancel_active(self, index: int) -> None:
+        fallback = self.slots.pop(index)
+        self.remaining -= len(fallback) + 1
+
+    def finish(self) -> bytes | None:
+        if not self.encoded:
+            return None
+        return b"[" + b",".join(self.encoded) + b"]"
 
 
 def read_frame(stream: BinaryIO) -> bytes | None:
@@ -330,6 +401,15 @@ def _is_nisi_run(message: object) -> bool:
     return isinstance(params, dict) and params.get("name") == "agiw_nisi_run"
 
 
+def _is_batch_nisi(message: object) -> bool:
+    if not _is_nisi_run(message) or message.get("jsonrpc") != "2.0":
+        return False
+    if set(message) - {"jsonrpc", "id", "method", "params"}:
+        return False
+    params = message.get("params")
+    return _modern_meta(message.get("method"), params) is None
+
+
 class _Session:
     """One stdio session: a reader thread feeds events; this loop owns replies, the worker and cancellation."""
 
@@ -340,6 +420,8 @@ class _Session:
         self.stopped = threading.Event()
         self.pending = deque()
         self.active = None  # (id, cancel event, worker thread, progress token, progress version)
+        self.batch = None
+        self.batch_worker_slot = None
         self.negotiated_version = None
         self.progress_count = 0
 
@@ -368,6 +450,16 @@ class _Session:
         if reply is not None:
             self.stdout.write(encode(reply))
             self.stdout.flush()
+
+    def respond_batch(self, batch: _Batch) -> None:
+        raw = batch.finish()
+        if raw is None:
+            return
+        if len(raw) > MAX_OUTPUT_BYTES:
+            self.respond(_error(None, INTERNAL_ERROR, "Response too large"))
+            return
+        self.stdout.write(raw + b"\n")
+        self.stdout.flush()
 
     def dispatch(self, message: object) -> dict | None:
         try:
@@ -411,10 +503,17 @@ class _Session:
             self.respond(_progress_notification(active[3], event, self.progress_count, active[4]))
 
     def _on_done(self, reply: dict | None) -> None:
-        if not self.active[1].is_set():
-            self.respond(reply)
-        self.active[2].join()
+        active = self.active
+        if not active[1].is_set():
+            if self.batch_worker_slot is None:
+                self.respond(reply)
+            elif reply is not None:
+                self.batch.complete(self.batch_worker_slot, reply)
+        elif self.batch_worker_slot is not None:
+            self.batch.cancel_active(self.batch_worker_slot)
+        active[2].join()
         self.active = None
+        self.batch_worker_slot = None
 
     def _on_event(self, kind: str, value) -> tuple[str, object]:
         if kind == "progress":
@@ -442,6 +541,8 @@ class _Session:
             return
         if self.active and _same_id(identifier, self.active[0]):
             self.active[1].set()
+        if self.batch is not None:
+            self.batch.cancel(identifier)
         self.pending = _drop_queued(self.pending, identifier)
 
     def _while_busy(self, message: object) -> None:
@@ -450,10 +551,21 @@ class _Session:
             self.respond(self.dispatch(message))
         elif len(self.pending) < 16:
             self.pending.append(message)
+        elif isinstance(message, list) and self.negotiated_version == "2025-03-26":
+            if not message:
+                self.respond(_error(None, INVALID_REQUEST, "Invalid Request"))
+                return
+            batch = _Batch(message)
+            if batch.reserve_size() > MAX_OUTPUT_BYTES:
+                self.respond(_error(None, INTERNAL_ERROR, "Response too large"))
+            else:
+                for index in tuple(batch.slots):
+                    batch.complete(index, _error(_reply_identifier(message[index]), INTERNAL_ERROR, "Server busy"))
+                self.respond_batch(batch)
         elif isinstance(message, dict) and _valid_id(message.get("id")):
             self.respond(_error(message["id"], INTERNAL_ERROR, "Server busy"))
 
-    def _start(self, message: dict) -> None:
+    def _start(self, message: dict, batch: _Batch | None = None, slot: int | None = None) -> None:
         cancel = threading.Event()
         worker = threading.Thread(target=self.run, args=(message, cancel), name="agiw-mcp-nisi")
         self.active = (
@@ -463,8 +575,53 @@ class _Session:
             _progress_token(message),
             _progress_version(message, self.negotiated_version),
         )
+        self.batch_worker_slot = slot if batch is not None else None
         self.progress_count = 0
         worker.start()
+
+    def _batch_reply(self, batch: _Batch, index: int, message: object) -> None:
+        if isinstance(message, dict) and "method" not in message:
+            batch.complete(index, _error(_reply_identifier(message), INVALID_REQUEST, "Invalid Request"))
+            return
+        if isinstance(message, dict) and message.get("method") == "initialize":
+            batch.complete(index, _error(_reply_identifier(message), INVALID_REQUEST, "Invalid Request"))
+            return
+        if isinstance(message, dict):
+            params = message.get("params")
+            if isinstance(params, dict) and _modern_meta(message.get("method"), params) is not None:
+                batch.complete(index, _error(_reply_identifier(message), INVALID_REQUEST, "Invalid Request"))
+                return
+        reply = self.dispatch(message)
+        if reply is not None:
+            batch.complete(index, reply)
+
+    def _advance_batch(self) -> None:
+        batch = self.batch
+        if batch is not None and self.active is None and batch.cursor < len(batch.members):
+            index = batch.cursor
+            message = batch.members[index]
+            batch.cursor += 1
+            if index in batch.slots:
+                if _is_batch_nisi(message):
+                    self._start(message, batch, index)
+                    return
+                else:
+                    self._batch_reply(batch, index, message)
+        if batch is not None and self.active is None and batch.cursor == len(batch.members):
+            self.respond_batch(batch)
+            self.batch = None
+
+    def _start_batch(self, members: list) -> None:
+        if not members:
+            self.respond(_error(None, INVALID_REQUEST, "Invalid Request"))
+            return
+        batch = _Batch(members)
+        if batch.reserve_size() > MAX_OUTPUT_BYTES:
+            self.respond(_error(None, INTERNAL_ERROR, "Response too large"))
+            return
+        self.batch = batch
+        while self.batch is batch and self.active is None:
+            self._advance_batch()
 
     def loop(self) -> int:
         reader = threading.Thread(target=self.read, name="agiw-mcp-stdin", daemon=True)
@@ -475,11 +632,17 @@ class _Session:
                 try:
                     # Honor buffered cancellation/EOF before dispatching queued work.
                     kind, value = (
-                        self.events.get_nowait() if self.active is None and self.pending else self.events.get()
+                        self.events.get_nowait()
+                        if self.active is None and (self.pending or self.batch is not None)
+                        else self.events.get()
                     )
                 except queue.Empty:
-                    message = self.pending.popleft()
-                    from_pending = True
+                    if self.batch is not None:
+                        self._advance_batch()
+                        continue
+                    else:
+                        message = self.pending.popleft()
+                        from_pending = True
                 else:
                     state, message = self._on_event(kind, value)
                     if state == "eof":
@@ -488,8 +651,10 @@ class _Session:
                         continue
                 if _is_cancel_notification(message):
                     self._on_cancel(message)
-                elif not from_pending and (self.active is not None or self.pending):
+                elif not from_pending and (self.active is not None or self.pending or self.batch is not None):
                     self._while_busy(message)
+                elif isinstance(message, list) and self.negotiated_version == "2025-03-26":
+                    self._start_batch(message)
                 elif _is_nisi_run(message):
                     self._start(message)
                 else:
