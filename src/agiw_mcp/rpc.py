@@ -163,25 +163,6 @@ def _tools_call(identifier, params: dict, *, modern: bool) -> dict:
     return _tool_result(identifier, structured, is_error, modern=modern)
 
 
-def _handle_modern(identifier, method: str, params: dict, meta: dict) -> dict:
-    """Serve one stateless modern request. Never reads or writes the process era."""
-    rejection = _modern_rejection(identifier, meta)
-    if rejection is not None:
-        return rejection
-    if method == "server/discover":
-        if set(params) - {"_meta"}:
-            return _error(identifier, INVALID_PARAMS, "Invalid params")
-        return _ok(identifier, _discover_result())
-    if method == "ping":
-        # ping is removed in 2026-07-28; a dual-era server keeps it for legacy clients only.
-        return _error(identifier, METHOD_NOT_FOUND, "Method not found")
-    if method == "tools/list":
-        return _tools_list(identifier, params, modern=True)
-    if method == "tools/call":
-        return _tools_call(identifier, params, modern=True)
-    return _error(identifier, METHOD_NOT_FOUND, "Method not found")
-
-
 def handle(message: object) -> dict | None:  # noqa: C901 - one branch per JSON-RPC method
     """Return a response dict, or None when no response is due."""
     if isinstance(message, list):
@@ -190,9 +171,7 @@ def handle(message: object) -> dict | None:  # noqa: C901 - one branch per JSON-
         return _error(None, INVALID_REQUEST, "Invalid Request")
     if "method" not in message:
         if "result" in message or "error" in message:
-            # A response to a server request; this server sends none, so ignore it.
             return None
-        # Neither a request nor a response: answer it, or a client waiting on that id hangs forever.
         identifier = message.get("id")
         return _error(identifier if _valid_id(identifier) else None, INVALID_REQUEST, "Invalid Request")
     method = message.get("method")
@@ -201,7 +180,7 @@ def handle(message: object) -> dict | None:  # noqa: C901 - one branch per JSON-
     if not isinstance(method, str) or set(message) - {"jsonrpc", "id", "method", "params"}:
         return _error(identifier if _valid_id(identifier) else None, INVALID_REQUEST, "Invalid Request")
     if not has_id:
-        return None  # notifications (initialized, cancelled, ...) need no reply
+        return None
     if not _valid_id(identifier):
         return _error(None, INVALID_REQUEST, "Invalid Request")
     params = message.get("params", {})
@@ -223,16 +202,19 @@ def handle(message: object) -> dict | None:  # noqa: C901 - one branch per JSON-
         )
     meta = _modern_meta(method, params)
     if meta is not None:
-        return _handle_modern(identifier, method, params, meta)
+        rejection = _modern_rejection(identifier, meta)
+        if rejection is not None:
+            return rejection
     if method == "server/discover":
-        # A modern method without modern _meta is a malformed request, not an unknown one.
-        return _error(identifier, INVALID_PARAMS, "Invalid params")
+        if meta is None or set(params) - {"_meta"}:
+            return _error(identifier, INVALID_PARAMS, "Invalid params")
+        return _ok(identifier, _discover_result())
     if method == "ping":
-        return _ok(identifier, {})
+        return _ok(identifier, {}) if meta is None else _error(identifier, METHOD_NOT_FOUND, "Method not found")
     if method == "tools/list":
-        return _tools_list(identifier, params, modern=False)
+        return _tools_list(identifier, params, modern=meta is not None)
     if method == "tools/call":
-        return _tools_call(identifier, params, modern=False)
+        return _tools_call(identifier, params, modern=meta is not None)
     return _error(identifier, METHOD_NOT_FOUND, "Method not found")
 
 
