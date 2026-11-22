@@ -6,6 +6,7 @@ import socket
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.request
 from unittest import mock
 
@@ -36,6 +37,51 @@ class NetTests(IsolatedTestCase):
             self.request_fixture(b'{"x":1}', 6)
         self.assertEqual(ctx.exception.kind, "too_large")
         self.assertEqual(ctx.exception.status, 200)
+
+    def test_http_error_closes_body_and_reports_status(self):
+        url = "http://127.0.0.1:1235/x"
+        with io.BytesIO(b"busy") as body, mock.patch.object(net, "_opener") as opener:
+            opener.return_value.open.side_effect = urllib.error.HTTPError(url, 429, "busy", {}, body)
+            with self.assertRaises(net.HttpFailure) as ctx:
+                net.request_json(url, timeout=3.0, max_bytes=1024)
+            self.assertEqual((ctx.exception.kind, ctx.exception.status), ("http", 429))
+            self.assertTrue(body.closed)
+
+    def test_http_error_body_is_closed_after_caller_timeout(self):
+        url = "http://127.0.0.1:1235/x"
+        started = threading.Event()
+        release = threading.Event()
+        workers = []
+
+        with io.BytesIO(b"busy") as body, mock.patch.object(net, "_opener") as opener:
+
+            def open_response(*_args, **_kwargs):
+                workers.append(threading.current_thread())
+                started.set()
+                release.wait(5.0)
+                raise urllib.error.HTTPError(url, 429, "busy", {}, body)
+
+            opener.return_value.open.side_effect = open_response
+            try:
+                with self.assertRaises(net.HttpFailure) as ctx:
+                    net.request_json(url, timeout=0.02, max_bytes=1024)
+                self.assertEqual((ctx.exception.kind, ctx.exception.status), ("timeout", None))
+            finally:
+                release.set()
+                self.assertTrue(started.wait(5.0))
+                workers[0].join(5.0)
+            self.assertFalse(workers[0].is_alive())
+            self.assertTrue(body.closed)
+
+    def test_refused_redirect_closes_body_without_reading(self):
+        request = urllib.request.Request("http://127.0.0.1:1235/x")
+        body = mock.Mock()
+        handler = net._NoRedirect()
+        with self.assertRaises(net.HttpFailure) as ctx:
+            handler.http_error_302(request, body, 302, "redirect", {"location": "/elsewhere"})
+        self.assertEqual((ctx.exception.kind, ctx.exception.status), ("redirect", 302))
+        body.close.assert_called_once_with()
+        body.read.assert_not_called()
 
     def test_proxy_variables_are_ignored(self):
         for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY"):
