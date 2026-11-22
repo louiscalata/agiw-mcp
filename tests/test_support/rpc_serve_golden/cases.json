@@ -535,7 +535,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjcwMCwibWVzc2FnZSI6IlBhcnNlIGVycm9yOiBmcmFtZSB0b28gbGFyZ2UifX0KeyJqc29ucnBjIjoiMi4wIiwiaWQiOjIsInJlc3VsdCI6e319Cg==",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: discarded an oversized frame\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -916,7 +916,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjcwMCwibWVzc2FnZSI6IlBhcnNlIGVycm9yOiBmcmFtZSB0b28gbGFyZ2UifX0K",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: discarded an oversized frame\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -1035,7 +1035,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjcwMCwibWVzc2FnZSI6IlBhcnNlIGVycm9yOiBmcmFtZSB0b28gbGFyZ2UifX0KeyJqc29ucnBjIjoiMi4wIiwiaWQiOjIsInJlc3VsdCI6e319Cg==",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: discarded an oversized frame\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -1200,7 +1200,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjcwMCwibWVzc2FnZSI6IlBhcnNlIGVycm9yOiBmcmFtZSB0b28gbGFyZ2UifX0K",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: discarded an oversized frame\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -11840,7 +11840,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOiJydW4iLCJlcnJvciI6eyJjb2RlIjotMzI2MDMsIm1lc3NhZ2UiOiJJbnRlcm5hbCBlcnJvciJ9fQo=",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: RuntimeError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -11980,7 +11980,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOjAsImVycm9yIjp7ImNvZGUiOi0zMjYwMywibWVzc2FnZSI6IkludGVybmFsIGVycm9yIn19Cg==",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: TypeError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -12107,7 +12107,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjYwMywibWVzc2FnZSI6IkludGVybmFsIGVycm9yIn19Cg==",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: TypeError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -12234,7 +12234,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjYwMywibWVzc2FnZSI6IkludGVybmFsIGVycm9yIn19Cg==",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: TypeError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -12361,7 +12361,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjYwMywibWVzc2FnZSI6IkludGVybmFsIGVycm9yIn19Cg==",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: TypeError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -12490,7 +12490,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjYwMywibWVzc2FnZSI6IkludGVybmFsIGVycm9yIn19Cg==",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: TypeError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -14405,7 +14405,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOjEsImVycm9yIjp7ImNvZGUiOi0zMjYwMywibWVzc2FnZSI6IkludGVybmFsIGVycm9yIn19Cg==",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: RuntimeError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -36835,7 +36835,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwibWV0aG9kIjoibm90aWZpY2F0aW9ucy9wcm9ncmVzcyIsInBhcmFtcyI6eyJwcm9ncmVzc1Rva2VuIjoidG9rZW4iLCJwcm9ncmVzcyI6MX19CnsianNvbnJwYyI6IjIuMCIsImlkIjoicnVuIiwiZXJyb3IiOnsiY29kZSI6LTMyNjAzLCJtZXNzYWdlIjoiSW50ZXJuYWwgZXJyb3IifX0K",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: ValueError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
@@ -37364,7 +37364,7 @@
         "raised": null,
         "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOiJydW4iLCJlcnJvciI6eyJjb2RlIjotMzI2MDMsIm1lc3NhZ2UiOiJJbnRlcm5hbCBlcnJvciJ9fQo=",
         "default_stdout_base64": "",
-        "stderr": "agiw-mcp: internal error: RuntimeError\n",
+        "stderr": "",
         "calls": [
           [
             "queue",
