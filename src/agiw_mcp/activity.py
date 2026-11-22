@@ -73,7 +73,7 @@ def _entry(fields: dict, allowed: dict, *, complete: bool) -> dict | None:
         if check is None or not check(value):
             return None
         entry[key] = value
-    if complete and set(allowed) - set(fields):
+    if complete and len(fields) != len(allowed):
         return None
     return entry
 
