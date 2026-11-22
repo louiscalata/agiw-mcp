@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """MCP over stdio: newline-delimited JSON-RPC 2.0.
 
-Only JSON-RPC frames are written to stdout; diagnostics go to stderr and never
-contain request content. Incoming lines are bounded; an oversized line is
-discarded up to its newline so the next frame stays aligned. Requests are
+Only JSON-RPC frames are written to stdout. Incoming lines are bounded and an
+oversized line is discarded up to its newline so the next frame stays aligned. Requests are
 serialized per process; ping and cancellation remain responsive during Nisi runs.
 """
 
@@ -52,14 +51,6 @@ UNSUPPORTED_PROTOCOL_VERSION = -32022
 
 class _FrameTooLarge(Exception):
     pass
-
-
-def _diag(message: str) -> None:
-    try:
-        sys.stderr.write(f"{SERVER_NAME}: {message}\n")
-        sys.stderr.flush()
-    except (OSError, ValueError):
-        pass
 
 
 def _error(identifier, code: int, message: str) -> dict:
@@ -399,8 +390,7 @@ class _Session:
             if isinstance(message, dict) and message.get("method") == "initialize" and reply and "result" in reply:
                 self.negotiated_version = reply["result"]["protocolVersion"]
             return reply
-        except Exception as exc:  # noqa: BLE001 - request boundary: logged to stderr, answered as INTERNAL_ERROR
-            _diag("internal error: " + type(exc).__name__)
+        except Exception:  # noqa: BLE001 - JSON-RPC 2.0 §5.1 Internal error
             identifier = message.get("id") if isinstance(message, dict) and _valid_id(message.get("id")) else None
             return _error(identifier, INTERNAL_ERROR, "Internal error")
 
@@ -442,7 +432,6 @@ class _Session:
         self.active = None
 
     def _on_event(self, kind: str, value) -> tuple[str, object]:
-        """Handle one reader/worker event. Returns ("message", decoded), ("skip", None) or ("eof", None)."""
         if kind == "progress":
             self._on_progress(value)
             return "skip", None
@@ -450,7 +439,6 @@ class _Session:
             self._on_done(value)
             return "skip", None
         if kind == "large":
-            _diag("discarded an oversized frame")
             self.respond(_error(None, PARSE_ERROR, "Parse error: frame too large"))
             return "skip", None
         if value is None:

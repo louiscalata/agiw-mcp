@@ -1,5 +1,6 @@
 # Copyright 2026 Louis Calata
 # SPDX-License-Identifier: Apache-2.0
+import contextlib
 import io
 import json
 import subprocess
@@ -150,14 +151,19 @@ class RpcTests(IsolatedTestCase):
 
     def test_oversized_frame_is_discarded_and_stream_stays_aligned(self):
         big = b'{"jsonrpc":"2.0","id":1,"method":"ping","params":{"x":"' + b"a" * (rpc.MAX_LINE_BYTES + 10) + b'"}}\n'
-        replies = exchange(big, frame({"jsonrpc": "2.0", "id": 2, "method": "ping"}))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            replies = exchange(big, frame({"jsonrpc": "2.0", "id": 2, "method": "ping"}))
+        self.assertEqual(stderr.getvalue(), "")
         self.assertEqual(replies[0]["error"]["code"], -32700)
         self.assertEqual(replies[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
     def test_internal_errors_hide_details(self):
-        from unittest import mock
-
-        with mock.patch.object(rpc, "call_tool", side_effect=RuntimeError("secret detail")):
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(rpc, "call_tool", side_effect=RuntimeError("secret detail")),
+            contextlib.redirect_stderr(stderr),
+        ):
             reply = exchange(
                 frame(
                     {
@@ -168,6 +174,7 @@ class RpcTests(IsolatedTestCase):
                     }
                 )
             )[0]
+        self.assertEqual(stderr.getvalue(), "")
         self.assertEqual(reply["error"], {"code": -32603, "message": "Internal error"})
 
     def test_stdio_subprocess_smoke(self):
