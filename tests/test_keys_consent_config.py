@@ -139,6 +139,19 @@ class ConsentTests(IsolatedTestCase):
         self.assertTrue(info["consentFile"].endswith("consent.json"))
         json.dumps(info)  # serializable for the tool layer
 
+    def test_show_reads_one_consent_record_and_admission_reads_again(self):
+        current = {"schema": 1, "granted": True, "disclosureSha256": consent.disclosure_sha256()}
+        stale = dict(current, disclosureSha256="0" * 64)
+        revoked = {"schema": 1, "granted": False}
+        with mock.patch.object(consent, "_read", side_effect=(stale, current, revoked)) as read:
+            status = consent.show()
+            read.assert_called_once_with()
+            self.assertFalse(status["granted"])
+            self.assertTrue(status["staleConsent"])
+            self.assertTrue(consent.consent_recorded())
+            self.assertFalse(consent.consent_recorded())
+            self.assertEqual(read.call_count, 3)
+
     def test_grant_requires_current_disclosure_hash(self):
         with self.assertRaises(ToolError) as ctx:
             consent.grant("0" * 64)
