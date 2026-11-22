@@ -9,7 +9,7 @@ is not a loopback literal is refused before a socket opens.
 
 from __future__ import annotations
 
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 import http.client
 import json
 import socket
@@ -41,12 +41,13 @@ class _Exchange:
     def cancel(self):
         with self.lock:
             self.cancelled = True
-            for sock in self.sockets:
-                try:
+            sockets, self.sockets = self.sockets, []
+        with ExitStack() as closes:
+            for sock in sockets:
+                closes.callback(sock.close)
+            for sock in sockets:
+                with suppress(OSError):
                     sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-                sock.close()
 
 
 class _HTTPConnection(http.client.HTTPConnection):
@@ -152,10 +153,14 @@ def request_json(
                 with suppress(Exception):
                     exc.close()
                 outcome["error"] = HttpFailure("http", status)
+            finally:
+                try:
+                    active.cancel()
+                except OSError as exc:
+                    outcome.setdefault("error", exc)
         except BaseException as exc:  # noqa: BLE001 - handed to the caller's thread below
             outcome["error"] = exc
         finally:
-            active.cancel()
             _WORKERS.release()
             del _LOCAL.exchange
 
@@ -167,7 +172,10 @@ def request_json(
         raise
     worker.join(timeout)
     if worker.is_alive():
-        active.cancel()
+        try:
+            active.cancel()
+        except OSError as exc:
+            raise HttpFailure("timeout") from exc
         raise HttpFailure("timeout")
     try:
         if "error" in outcome:
