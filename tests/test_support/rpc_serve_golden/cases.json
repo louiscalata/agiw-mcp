@@ -47511,7 +47511,7 @@
       "expected": {
         "return": 0,
         "raised": null,
-        "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjYwMCwibWVzc2FnZSI6IkludmFsaWQgUmVxdWVzdCJ9fQo=",
+        "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOiJydW4iLCJlcnJvciI6eyJjb2RlIjotMzI2MDAsIm1lc3NhZ2UiOiJJbnZhbGlkIFJlcXVlc3QifX0K",
         "default_stdout_base64": "",
         "stderr": "",
         "calls": [
@@ -47611,7 +47611,7 @@
           ],
           [
             "stdout.write",
-            "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjYwMCwibWVzc2FnZSI6IkludmFsaWQgUmVxdWVzdCJ9fQo="
+            "eyJqc29ucnBjIjoiMi4wIiwiaWQiOiJydW4iLCJlcnJvciI6eyJjb2RlIjotMzI2MDAsIm1lc3NhZ2UiOiJJbnZhbGlkIFJlcXVlc3QifX0K"
           ],
           [
             "stdout.flush"
@@ -47679,7 +47679,7 @@
       "expected": {
         "return": 0,
         "raised": null,
-        "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjYwMCwibWVzc2FnZSI6IkludmFsaWQgUmVxdWVzdCJ9fQo=",
+        "stdout_base64": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOjEsImVycm9yIjp7ImNvZGUiOi0zMjYwMCwibWVzc2FnZSI6IkludmFsaWQgUmVxdWVzdCJ9fQo=",
         "default_stdout_base64": "",
         "stderr": "",
         "calls": [
@@ -47774,7 +47774,7 @@
           ],
           [
             "stdout.write",
-            "eyJqc29ucnBjIjoiMi4wIiwiaWQiOm51bGwsImVycm9yIjp7ImNvZGUiOi0zMjYwMCwibWVzc2FnZSI6IkludmFsaWQgUmVxdWVzdCJ9fQo="
+            "eyJqc29ucnBjIjoiMi4wIiwiaWQiOjEsImVycm9yIjp7ImNvZGUiOi0zMjYwMCwibWVzc2FnZSI6IkludmFsaWQgUmVxdWVzdCJ9fQo="
           ],
           [
             "stdout.flush"

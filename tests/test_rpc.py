@@ -123,6 +123,49 @@ class RpcTests(IsolatedTestCase):
         self.assertEqual(codes, [-32700, -32600, -32601, -32602, -32602, -32600, -32600, -32700, None])
         self.assertEqual(replies[-1], {"jsonrpc": "2.0", "id": 9, "result": {}})
 
+    def test_rejected_jsonrpc_versions_echo_only_valid_ids(self):
+        def invalid_request(identifier):
+            return {
+                "jsonrpc": "2.0",
+                "id": identifier,
+                "error": {"code": -32600, "message": "Invalid Request"},
+            }
+
+        versions = (("missing", False, None), ("null", True, None), ("wrong", True, "1.0"))
+        valid_ids = ("", "request-id", 0, 6)
+        invalid_ids = (None, True, 1.5, [], {})
+        for version_name, has_version, version in versions:
+            for identifier in valid_ids:
+                with self.subTest(version=version_name, identifier=identifier):
+                    message = {"id": identifier, "method": "ping"}
+                    if has_version:
+                        message["jsonrpc"] = version
+                    self.assertEqual(rpc.handle(message), invalid_request(identifier))
+
+            for identifier in invalid_ids:
+                with self.subTest(version=version_name, invalid_id=identifier):
+                    message = {"id": identifier, "method": "ping"}
+                    if has_version:
+                        message["jsonrpc"] = version
+                    self.assertEqual(rpc.handle(message), invalid_request(None))
+
+            with self.subTest(version=version_name, id="absent"):
+                message = {"method": "ping"}
+                if has_version:
+                    message["jsonrpc"] = version
+                self.assertEqual(rpc.handle(message), invalid_request(None))
+
+        self.assertIsNone(rpc.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        self.assertEqual(rpc.handle(42), invalid_request(None))
+        self.assertEqual(
+            rpc.handle([{"jsonrpc": "2.0", "id": 1, "method": "ping"}]),
+            {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32600, "message": "Batch requests are not supported"},
+            },
+        )
+
     def test_a_frame_that_is_neither_request_nor_response_is_answered(self):
         replies = exchange(
             frame([INIT]),

@@ -167,8 +167,11 @@ def handle(message: object) -> dict | None:  # noqa: C901 - one branch per JSON-
     """Return a response dict, or None when no response is due."""
     if isinstance(message, list):
         return _error(None, INVALID_REQUEST, "Batch requests are not supported")
-    if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+    if not isinstance(message, dict):
         return _error(None, INVALID_REQUEST, "Invalid Request")
+    if message.get("jsonrpc") != "2.0":
+        identifier = message.get("id")
+        return _error(identifier if _valid_id(identifier) else None, INVALID_REQUEST, "Invalid Request")
     if "method" not in message:
         if "result" in message or "error" in message:
             return None
