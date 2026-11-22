@@ -152,6 +152,31 @@ class ConsentTests(IsolatedTestCase):
             self.assertFalse(consent.consent_recorded())
             self.assertEqual(read.call_count, 3)
 
+    def test_read_refuses_duplicate_json_names(self):
+        path = self.config_dir / consent.CONSENT_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for raw in (
+            '{"schema":1,"label":"first","label":"second"}',
+            '{"schema":1,"metadata":{"label":"first","label":"second"}}',
+        ):
+            with self.subTest(raw=raw):
+                path.write_text(raw, encoding="utf-8")
+                self.assertIsNone(consent._read())
+
+    def test_read_accepts_writer_generated_consent_records(self):
+        consent.grant(consent.disclosure_sha256())
+        granted = consent._read()
+        self.assertIsInstance(granted, dict)
+        self.assertEqual(granted["schema"], 1)
+        self.assertIs(granted["granted"], True)
+        self.assertEqual(granted["disclosureSha256"], consent.disclosure_sha256())
+
+        consent.revoke()
+        revoked = consent._read()
+        self.assertIsInstance(revoked, dict)
+        self.assertEqual(revoked["schema"], 1)
+        self.assertIs(revoked["granted"], False)
+
     def test_grant_requires_current_disclosure_hash(self):
         with self.assertRaises(ToolError) as ctx:
             consent.grant("0" * 64)
