@@ -54,6 +54,14 @@ INIT = {
 
 
 class RpcTests(IsolatedTestCase):
+    def test_frames_reject_duplicate_names_and_non_finite_numbers(self):
+        for raw in (b'{"x":1,"x":2}', b'{"x":NaN}', b'{"x":Infinity}', b'{"x":-Infinity}'):
+            with self.subTest(raw=raw):
+                self.assertEqual(
+                    exchange(raw + b"\n"),
+                    [{"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}],
+                )
+
     def test_stdio_batches_are_enabled_only_after_2025_03_26_negotiation(self):
         members = [{"jsonrpc": "2.0", "id": index, "method": "ping"} for index in range(2)]
         replies = exchange(frame(_initialize("2025-03-26")), frame(members))

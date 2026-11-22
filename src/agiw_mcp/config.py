@@ -41,6 +41,7 @@ import tempfile
 from urllib.parse import urlsplit
 
 from .errors import ToolError
+from .jsonutil import unique_object_pairs
 
 APP_DIR_NAME = "agiw-mcp"
 CONFIG_FILE = "config.json"
@@ -293,7 +294,7 @@ def _read_file(path: Path) -> dict:
     if len(raw) > MAX_CONFIG_BYTES:
         raise ConfigError("CONFIG_INVALID", "The config file is larger than 64 KB.")
     try:
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object_pairs)
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise ConfigError("CONFIG_INVALID", "The config file is not valid JSON.") from exc
     if not isinstance(value, dict):
@@ -307,15 +308,6 @@ def _read_file(path: Path) -> dict:
 def open_nonblocking(path, flags):
     """An open() opener that cannot block on a FIFO; callers then refuse anything but a regular file."""
     return os.open(path, flags | getattr(os, "O_NONBLOCK", 0))
-
-
-def _unique_pairs(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate key")
-        result[key] = value
-    return result
 
 
 def load_config() -> Config:
