@@ -92,14 +92,17 @@ def _read() -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _grant_matches(record: dict, disclosure_hash: str) -> bool:
+    return (
+        record.get("schema") == 1
+        and record.get("granted") is True
+        and record.get("disclosureSha256") == disclosure_hash
+    )
+
+
 def consent_recorded() -> bool:
     record = _read()
-    return bool(
-        record
-        and record.get("schema") == 1
-        and record.get("granted") is True
-        and record.get("disclosureSha256") == disclosure_sha256()
-    )
+    return bool(record and _grant_matches(record, disclosure_sha256()))
 
 
 def _now() -> str:
@@ -108,13 +111,14 @@ def _now() -> str:
 
 def show() -> dict:
     record = _read() or {}
-    stale = bool(record.get("granted") is True and record.get("disclosureSha256") != disclosure_sha256())
+    disclosure_hash = disclosure_sha256()
+    stale = record.get("granted") is True and record.get("disclosureSha256") != disclosure_hash
     return {
-        "granted": consent_recorded(),
+        "granted": _grant_matches(record, disclosure_hash),
         "staleConsent": stale,
         "endpoint": JEV_ENDPOINT,
         "disclosure": disclosure_text(),
-        "disclosureSha256": disclosure_sha256(),
+        "disclosureSha256": disclosure_hash,
         "consentFile": display_path(_path()),
         "howToGrant": (
             "To grant consent after reading this disclosure, run "
