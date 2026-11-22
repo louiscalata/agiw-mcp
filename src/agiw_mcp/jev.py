@@ -45,7 +45,7 @@ def _usage(value) -> dict | None:
     return dict(sorted(kept.items())[:8]) or None
 
 
-def _prepare(phase: str, text) -> tuple[str, int, bool]:
+def _prepare(phase: str, text) -> tuple[str, int, str, int, bool]:
     if not isinstance(text, str) or not text.strip():
         raise ToolError("INPUT_INVALID", "Provide non-empty text.")
     if "\x00" in text:
@@ -54,19 +54,20 @@ def _prepare(phase: str, text) -> tuple[str, int, bool]:
         raw = text.encode("utf-8")
     except UnicodeError:
         raise ToolError("INPUT_INVALID", "The text must be valid Unicode.") from None
+    input_bytes = len(raw)
     if phase == "pre":
-        if len(raw) > consent.MAX_PRE_BYTES:
+        if input_bytes > consent.MAX_PRE_BYTES:
             raise ToolError(
                 "INPUT_TOO_LARGE",
-                f"The task text is {len(raw)} bytes; the limit is {consent.MAX_PRE_BYTES}. "
+                f"The task text is {input_bytes} bytes; the limit is {consent.MAX_PRE_BYTES}. "
                 "Summarize the task and try again.",
             )
-        return text, len(raw), False
-    if len(raw) <= consent.MAX_POST_BYTES:
-        return text, len(raw), False
+    input_sha = hashlib.sha256(raw).hexdigest()
+    if phase == "pre" or input_bytes <= consent.MAX_POST_BYTES:
+        return text, input_bytes, input_sha, input_bytes, False
     budget = consent.MAX_POST_BYTES - len(TRUNCATION_MARK.encode("utf-8"))
     clipped = raw[:budget].decode("utf-8", errors="ignore") + TRUNCATION_MARK
-    return clipped, len(raw), True
+    return clipped, input_bytes, input_sha, len(clipped.encode("utf-8")), True
 
 
 def _finite(value) -> bool:
@@ -153,8 +154,7 @@ def _row(qid: str, question: dict, answer: dict) -> dict:
 
 def analyse(phase: str, text, config: Config) -> dict:
     tool = f"agiw_jev_{phase}"
-    sent_text, input_bytes, truncated = _prepare(phase, text)
-    input_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    sent_text, input_bytes, input_sha, sent_bytes, truncated = _prepare(phase, text)
     if not consent.consent_recorded():
         raise ToolError(
             "CONSENT_REQUIRED",
@@ -169,7 +169,6 @@ def analyse(phase: str, text, config: Config) -> dict:
     questions = QUESTIONS[phase]
     body = {"model": config.jev_model, "state": {STATE_KEY[phase]: sent_text}, "questions": questions}
     request_sha = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-    sent_bytes = len(sent_text.encode("utf-8"))
     started = time.monotonic()
 
     def log(outcome: str, status=None, flagged=None):
@@ -201,7 +200,7 @@ def analyse(phase: str, text, config: Config) -> dict:
     except HttpFailure as failure:
         raise _failure_error(failure, log) from None
     finally:
-        key = None  # drop the reference as early as possible
+        key = None
 
     answers = _answers(response, questions)
     if answers is None:
