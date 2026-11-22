@@ -306,7 +306,7 @@ class _Batch:
     def cancel(self, identifier) -> None:
         for index, fallback in tuple(self.slots.items()):
             member = self.members[index]
-            if index >= self.cursor and isinstance(member, dict) and _same_id(member.get("id"), identifier):
+            if index >= self.cursor and _cancellable_batch_member(member, identifier):
                 self.remaining -= len(fallback) + 1
                 del self.slots[index]
 
@@ -388,9 +388,39 @@ def _same_id(left, right) -> bool:
     return type(left) is type(right) and left == right
 
 
-def _drop_queued(pending: deque, identifier) -> deque:
+def _cancellable_batch_member(message: object, identifier) -> bool:
+    if not isinstance(message, dict):
+        return False
+    request_id = message.get("id")
+    if not _same_id(request_id, identifier) or not _valid_id(request_id):
+        return False
+    if message.get("jsonrpc") != "2.0":
+        return False
+    method = message.get("method")
+    if not isinstance(method, str) or method == "initialize":
+        return False
+    if set(message) - {"jsonrpc", "id", "method", "params"}:
+        return False
+    params = message.get("params")
+    if params is not None and not isinstance(params, dict):
+        return False
+    return not (isinstance(params, dict) and _modern_meta(method, params) is not None)
+
+
+def _drop_queued(pending: deque, identifier, negotiated_version: str | None = None) -> deque:
     """Queued requests minus any whose id matches the cancelled one."""
-    return deque(item for item in pending if not (isinstance(item, dict) and _same_id(item.get("id"), identifier)))
+    retained = deque()
+    for item in pending:
+        if isinstance(item, dict):
+            if not _same_id(item.get("id"), identifier):
+                retained.append(item)
+        elif isinstance(item, list) and negotiated_version == "2025-03-26":
+            members = [member for member in item if not _cancellable_batch_member(member, identifier)]
+            if members or not item:
+                retained.append(members)
+        else:
+            retained.append(item)
+    return retained
 
 
 def _is_nisi_run(message: object) -> bool:
@@ -543,7 +573,7 @@ class _Session:
             self.active[1].set()
         if self.batch is not None:
             self.batch.cancel(identifier)
-        self.pending = _drop_queued(self.pending, identifier)
+        self.pending = _drop_queued(self.pending, identifier, self.negotiated_version)
 
     def _while_busy(self, message: object) -> None:
         """A request that arrives while a Nisi run is active or work is queued: answer ping, queue or refuse."""
