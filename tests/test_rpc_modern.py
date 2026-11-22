@@ -81,9 +81,18 @@ class RpcModernTests(IsolatedTestCase):
     def test_unsupported_modern_version_lists_supported_and_requested(self):
         self.assertEqual(rpc.MODERN_PROTOCOLS, ("2026-07-28",))
         meta = dict(MODERN_META, **{"io.modelcontextprotocol/protocolVersion": "1900-01-01"})
-        for method in ("server/discover", "tools/list"):
-            with self.subTest(method=method):
-                reply = exchange(frame(request(method, {"_meta": meta})))[0]
+        cases = (
+            ("server/discover", {}),
+            ("server/discover", {"cursor": "next"}),
+            ("tools/list", {}),
+            ("tools/list", {"cursor": "next"}),
+            ("tools/call", {"arguments": []}),
+            ("ping", {}),
+            ("unknown", {}),
+        )
+        for method, params in cases:
+            with self.subTest(method=method, params=params):
+                reply = exchange(frame(request(method, {**params, "_meta": meta})))[0]
                 self.assertEqual(
                     reply["error"],
                     {
