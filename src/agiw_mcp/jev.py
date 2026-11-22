@@ -34,15 +34,14 @@ def endpoint() -> str:
 
 
 def _usage(value) -> dict | None:
-    """Only small non-negative integer counters, so a response cannot echo text or a key back out."""
     if not isinstance(value, dict):
         return None
-    kept = {
-        key: count
+    items = sorted(
+        (key, count)
         for key, count in value.items()
         if isinstance(key, str) and USAGE_KEY.match(key) and type(count) is int and 0 <= count < 10**9
-    }
-    return dict(sorted(kept.items())[:8]) or None
+    )[:8]
+    return dict(items) or None
 
 
 def _prepare(phase: str, text) -> tuple[str, int, str, int, bool]:
