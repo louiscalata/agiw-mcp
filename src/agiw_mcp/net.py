@@ -9,6 +9,7 @@ is not a loopback literal is refused before a socket opens.
 
 from __future__ import annotations
 
+from contextlib import suppress
 import http.client
 import json
 import socket
@@ -88,6 +89,8 @@ class HttpFailure(Exception):
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        with suppress(Exception):
+            fp.close()
         raise HttpFailure("redirect", code)
 
 
@@ -140,9 +143,15 @@ def request_json(
     def exchange() -> None:
         _LOCAL.exchange = active
         try:
-            with _opener().open(req, timeout=timeout) as resp:
-                outcome["raw"] = resp.read(max_bytes + 1)
-                outcome["status"] = resp.status
+            try:
+                with _opener().open(req, timeout=timeout) as resp:
+                    outcome["raw"] = resp.read(max_bytes + 1)
+                    outcome["status"] = resp.status
+            except urllib.error.HTTPError as exc:
+                status = exc.code
+                with suppress(Exception):
+                    exc.close()
+                outcome["error"] = HttpFailure("http", status)
         except BaseException as exc:  # noqa: BLE001 - handed to the caller's thread below
             outcome["error"] = exc
         finally:
@@ -164,15 +173,6 @@ def request_json(
         if "error" in outcome:
             raise outcome["error"]
         raw, status = outcome["raw"], outcome["status"]
-    except HttpFailure:
-        raise
-    except urllib.error.HTTPError as exc:
-        status = exc.code
-        try:
-            exc.close()
-        except Exception:  # noqa: BLE001 - closing the error body is best effort; the HTTP status is raised below
-            pass
-        raise HttpFailure("http", status) from None
     except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
         # HTTPException covers a reply cut off mid-body (IncompleteRead) or a garbled status line:
         # the server is not answering usefully, which callers report as unreachable.
