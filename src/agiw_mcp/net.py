@@ -19,6 +19,7 @@ import urllib.request
 from urllib.parse import urlsplit
 
 from .config import test_mode
+from .jsonutil import reject_nonfinite, unique_object_pairs
 
 # Even DNS or TLS setup that cannot be interrupted may occupy only two workers.
 _WORKERS = threading.BoundedSemaphore(2)
@@ -188,20 +189,7 @@ def request_json(
     if len(raw) > max_bytes:
         raise HttpFailure("too_large", status)
     try:
-        parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_reject_constant)
+        parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object_pairs, parse_constant=reject_nonfinite)
     except (UnicodeError, ValueError, RecursionError):
         raise HttpFailure("invalid_json", status) from None
     return status, parsed
-
-
-def _unique(pairs):
-    out = {}
-    for key, value in pairs:
-        if key in out:
-            raise ValueError("duplicate key")
-        out[key] = value
-    return out
-
-
-def _reject_constant(_value):
-    raise ValueError("non-finite number")

@@ -18,6 +18,7 @@ from typing import BinaryIO
 
 from . import SERVER_NAME, __version__
 from . import nisi
+from .jsonutil import reject_nonfinite, unique_object_pairs
 from .tools import TOOL_NAMES, TOOLS, call_tool
 
 MAX_LINE_BYTES = 4 * 1024 * 1024
@@ -61,21 +62,8 @@ def _ok(identifier, result: dict) -> dict:
     return {"jsonrpc": "2.0", "id": identifier, "result": result}
 
 
-def _unique(pairs):
-    out = {}
-    for key, value in pairs:
-        if key in out:
-            raise ValueError("duplicate key")
-        out[key] = value
-    return out
-
-
-def _reject_constant(_value):
-    raise ValueError("non-finite number")
-
-
 def decode_frame(raw: bytes):
-    return json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_reject_constant)
+    return json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object_pairs, parse_constant=reject_nonfinite)
 
 
 def _tool_result(identifier, structured: dict, is_error: bool, *, modern: bool = False) -> dict:
