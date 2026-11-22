@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from contextlib import contextmanager
 import json
 import queue
@@ -249,6 +250,250 @@ class RpcProgressTests(IsolatedTestCase):
             session.release.set()
             session.ping("after")
             self.assertEqual(session.next()["id"], "after")
+
+    def test_later_cancellation_filters_queued_batch_members_without_freeing_its_frame_slot(self):
+        def run(identifier):
+            return {
+                "jsonrpc": "2.0",
+                "id": identifier,
+                "method": "tools/call",
+                "params": {"name": "agiw_nisi_run", "arguments": {}},
+            }
+
+        def cancel(identifier):
+            return {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": identifier},
+            }
+
+        nested_initialize = {
+            "jsonrpc": "2.0",
+            "id": "nested-init",
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-03-26"},
+        }
+        modern = {
+            "jsonrpc": "2.0",
+            "id": "modern",
+            "method": "tools/list",
+            "params": {
+                "_meta": {
+                    rpc.PROTOCOL_VERSION_KEY: "2026-07-28",
+                    rpc.CLIENT_CAPABILITIES_KEY: {},
+                }
+            },
+        }
+        wrong_version = {"jsonrpc": "1.0", "id": "wrong-version", "method": "ping"}
+        response = {"jsonrpc": "2.0", "id": "response", "result": {}}
+        invalid_params = {"jsonrpc": "2.0", "id": "invalid-params", "method": "ping", "params": []}
+        malformed = {"jsonrpc": "2.0", "id": "malformed"}
+        calls = []
+        with _session(self, events=(), version="2025-03-26") as session:
+
+            def call_tool(name, args):
+                calls.append(name)
+                return session.tool(name, args)
+
+            with mock.patch.object(rpc, "call_tool", side_effect=call_tool):
+                session.stdin.send(
+                    [
+                        run("active"),
+                        {"jsonrpc": "2.0", "id": "active-kept", "method": "ping"},
+                    ]
+                )
+                self.assertTrue(session.started.wait(2))
+                for index in range(15):
+                    session.stdin.send({"jsonrpc": "2.0", "id": f"queued-{index}", "method": "missing"})
+                session.stdin.send(
+                    [
+                        run("drop"),
+                        run("7"),
+                        run(7),
+                        nested_initialize,
+                        modern,
+                        wrong_version,
+                        response,
+                        invalid_params,
+                        malformed,
+                        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                        {"jsonrpc": "2.0", "id": "kept", "method": "ping"},
+                    ]
+                )
+                session.stdin.send(cancel("drop"))
+                session.stdin.send(cancel("7"))
+                for identifier in (
+                    "nested-init",
+                    "modern",
+                    "wrong-version",
+                    "response",
+                    "invalid-params",
+                    "malformed",
+                ):
+                    session.stdin.send(cancel(identifier))
+                session.stdin.send([run("busy-run"), {"jsonrpc": "2.0", "id": "busy-ping", "method": "ping"}])
+                session.ping("barrier")
+
+                self.assertEqual(
+                    session.next(),
+                    [
+                        {"jsonrpc": "2.0", "id": "busy-run", "error": {"code": -32603, "message": "Server busy"}},
+                        {"jsonrpc": "2.0", "id": "busy-ping", "error": {"code": -32603, "message": "Server busy"}},
+                    ],
+                )
+                self.assertEqual(session.next(), {"jsonrpc": "2.0", "id": "barrier", "result": {}})
+                session.release.set()
+
+                active_batch = session.next()
+                self.assertEqual([reply["id"] for reply in active_batch], ["active", "active-kept"])
+                queued = [session.next() for _ in range(15)]
+                self.assertEqual([reply["id"] for reply in queued], [f"queued-{index}" for index in range(15)])
+                self.assertTrue(all(reply["error"]["code"] == -32601 for reply in queued))
+                batch = session.next()
+                self.assertEqual(
+                    [reply["id"] for reply in batch],
+                    [7, "nested-init", "modern", "wrong-version", "response", "invalid-params", "malformed", "kept"],
+                )
+                self.assertTrue(
+                    all(reply["error"] == {"code": -32600, "message": "Invalid Request"} for reply in batch[1:5])
+                )
+                self.assertEqual(batch[5]["error"], {"code": -32602, "message": "Invalid params"})
+                self.assertEqual(batch[6]["error"], {"code": -32600, "message": "Invalid Request"})
+                self.assertEqual(batch[7], {"jsonrpc": "2.0", "id": "kept", "result": {}})
+            self.assertEqual(calls, ["agiw_nisi_run", "agiw_nisi_run"])
+            self.assertEqual(session.stdout.writers, {session.thread.ident})
+
+    def test_batch_filter_keeps_notification_invalid_and_unsupported_frames(self):
+        request = {
+            "jsonrpc": "2.0",
+            "id": "cancelled",
+            "method": "ping",
+        }
+        notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        invalid = {"jsonrpc": "2.0", "id": "invalid"}
+        pending = deque([[request, notification], [invalid], [request], []])
+
+        filtered = rpc._drop_queued(pending, "cancelled", "2025-03-26")
+        self.assertEqual(list(filtered), [[notification], [invalid], []])
+
+        unsupported = rpc._drop_queued(deque([[request]]), "cancelled", "2025-06-18")
+        self.assertEqual(list(unsupported), [[request]])
+
+        ordinary = {"jsonrpc": "2.0", "id": "cancelled", "method": "ping"}
+        self.assertEqual(list(rpc._drop_queued(deque([ordinary]), "cancelled", "2025-06-18")), [])
+
+    def test_cancellation_does_not_suppress_nested_initialize_error_in_active_batch(self):
+        nested_initialize = {
+            "jsonrpc": "2.0",
+            "id": "nested-init",
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-03-26"},
+        }
+        cancellation = {
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": "nested-init"},
+        }
+        with _session(self, events=(), version="2025-03-26") as session:
+            session.stdin.send(
+                [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "active",
+                        "method": "tools/call",
+                        "params": {"name": "agiw_nisi_run", "arguments": {}},
+                    },
+                    nested_initialize,
+                ]
+            )
+            self.assertTrue(session.started.wait(2))
+            session.stdin.send(cancellation)
+            session.ping("barrier")
+            self.assertEqual(session.next(), {"jsonrpc": "2.0", "id": "barrier", "result": {}})
+            session.release.set()
+            batch = session.next()
+            self.assertEqual([reply["id"] for reply in batch], ["active", "nested-init"])
+            self.assertEqual(batch[1]["error"], {"code": -32600, "message": "Invalid Request"})
+
+    def test_fully_cancelled_queued_batch_does_not_become_an_empty_batch(self):
+        def cancel(identifier):
+            return {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": identifier},
+            }
+
+        calls = []
+        with _session(self, events=(), version="2025-03-26") as session:
+
+            def call_tool(name, args):
+                calls.append(name)
+                return session.tool(name, args)
+
+            with mock.patch.object(rpc, "call_tool", side_effect=call_tool):
+                session.call()
+                self.assertTrue(session.started.wait(2))
+                session.stdin.send(
+                    [
+                        {
+                            "jsonrpc": "2.0",
+                            "id": "future",
+                            "method": "tools/call",
+                            "params": {"name": "agiw_nisi_run", "arguments": {}},
+                        }
+                    ]
+                )
+                session.stdin.send(cancel("future"))
+                session.stdin.send({"jsonrpc": "2.0", "id": "sentinel", "method": "missing"})
+                session.ping("barrier")
+                self.assertEqual(session.next(), {"jsonrpc": "2.0", "id": "barrier", "result": {}})
+                session.release.set()
+                self.assertEqual(session.next()["id"], "run")
+                self.assertEqual(
+                    session.next(),
+                    {"jsonrpc": "2.0", "id": "sentinel", "error": {"code": -32601, "message": "Method not found"}},
+                )
+                self.assertTrue(session.stdout.frames.empty())
+            self.assertEqual(calls, ["agiw_nisi_run"])
+
+    def test_queued_arrays_on_other_versions_keep_the_single_message_rejection(self):
+        calls = []
+        with _session(self, events=(), version="2025-06-18") as session:
+
+            def call_tool(name, args):
+                calls.append(name)
+                return session.tool(name, args)
+
+            with mock.patch.object(rpc, "call_tool", side_effect=call_tool):
+                session.call()
+                self.assertTrue(session.started.wait(2))
+                session.stdin.send(
+                    [
+                        {
+                            "jsonrpc": "2.0",
+                            "id": "future",
+                            "method": "tools/call",
+                            "params": {"name": "agiw_nisi_run", "arguments": {}},
+                        },
+                        {"jsonrpc": "2.0", "id": "kept", "method": "ping"},
+                    ]
+                )
+                session.stdin.send(
+                    {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "future"}}
+                )
+                session.ping("barrier")
+                self.assertEqual(session.next(), {"jsonrpc": "2.0", "id": "barrier", "result": {}})
+                session.release.set()
+                self.assertEqual(session.next()["id"], "run")
+                self.assertEqual(
+                    session.next(),
+                    {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32600, "message": "Batch requests are not supported"},
+                    },
+                )
+            self.assertEqual(calls, ["agiw_nisi_run"])
 
     def test_progress_queued_before_cancellation_is_not_sent_after_it(self):
         # The worker queues the event before the main loop applies the cancel frame ahead of it in the queue.
