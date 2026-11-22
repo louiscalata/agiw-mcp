@@ -69,7 +69,7 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONWARNINGS: error
-        run: python -B -m unittest discover -s tests -v
+        run: python -B scripts/run_unittest.py discover -s tests -v
 
   python-only:
     name: Python side without Node
@@ -93,7 +93,7 @@ jobs:
           ln -s "$(command -v sleep)" "$node_free_path/sleep"
           export PATH="$node_free_path"
           if command -v node; then exit 1; fi
-          python -B -m unittest discover -s tests -v
+          python -B scripts/run_unittest.py discover -s tests -v
 
   distribution:
     name: Installed wheel and sdist
@@ -133,6 +133,7 @@ jobs:
               "tests/support.py",
               "scripts/scrub_check.py",
               "scripts/installed_smoke.py",
+              "scripts/run_unittest.py",
               "scripts/stdio_handshake.py",
               "scripts/suite_compat.py",
           ]
@@ -150,12 +151,12 @@ jobs:
             "$RUNNER_TEMP/installed/bin/python" -m pip install "$artifact"
             cd "$RUNNER_TEMP"
             "$RUNNER_TEMP/installed/bin/python" -I -W error "$GITHUB_WORKSPACE/scripts/installed_smoke.py"
-            AGIW_MCP_TEST_INSTALLED=1 PYTHONWARNINGS=error "$RUNNER_TEMP/installed/bin/python" -B -m unittest discover \
+            AGIW_MCP_TEST_INSTALLED=1 PYTHONWARNINGS=error "$RUNNER_TEMP/installed/bin/python" -B "$GITHUB_WORKSPACE/scripts/run_unittest.py" discover \
               -s "$GITHUB_WORKSPACE/tests" -p test_nisi_model_responses.py -v
             # Replay the Jev boundary golden fixtures against the installed archive, not src/.
             AGIW_MCP_TEST_INSTALLED=1 PYTHONWARNINGS=error "$RUNNER_TEMP/installed/bin/python" -B -c \
               "import agiw_mcp, sys; sys.exit('agiw_mcp imported from the checkout' if '$GITHUB_WORKSPACE' in agiw_mcp.__file__ else 0)"
-            AGIW_MCP_TEST_INSTALLED=1 PYTHONWARNINGS=error "$RUNNER_TEMP/installed/bin/python" -B -m unittest discover \
+            AGIW_MCP_TEST_INSTALLED=1 PYTHONWARNINGS=error "$RUNNER_TEMP/installed/bin/python" -B "$GITHUB_WORKSPACE/scripts/run_unittest.py" discover \
               -s "$GITHUB_WORKSPACE/tests" -p 'test_jev_analyse_golden*.py'
             cd "$GITHUB_WORKSPACE"
             rm -rf "$RUNNER_TEMP/installed"
@@ -219,7 +220,7 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONWARNINGS: error
-        run: python -B -m unittest discover -s tests -v
+        run: python -B scripts/run_unittest.py discover -s tests -v
 
   suite-compat:
     name: AGIW Suite main
