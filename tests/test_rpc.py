@@ -5,10 +5,12 @@ import io
 import json
 import subprocess
 import sys
+import threading
 import unittest
 from unittest import mock
 
 from support import IsolatedTestCase, ROOT, subprocess_env
+from test_rpc_progress import _EVENT, _session
 
 from agiw_mcp import rpc
 
@@ -24,6 +26,25 @@ def frame(message) -> bytes:
     return json.dumps(message).encode() + b"\n"
 
 
+def _batch_bytes(members: list) -> bytes:
+    """Run a batch on a session that has already negotiated its legacy version."""
+    stdin = io.BytesIO(frame(members))
+    stdout = io.BytesIO()
+    session = rpc._Session(stdin, stdout)
+    session.negotiated_version = "2025-03-26"
+    session.loop()
+    return stdout.getvalue()
+
+
+def _initialize(version: str) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": "init",
+        "method": "initialize",
+        "params": {**INIT["params"], "protocolVersion": version},
+    }
+
+
 INIT = {
     "jsonrpc": "2.0",
     "id": 1,
@@ -33,6 +54,307 @@ INIT = {
 
 
 class RpcTests(IsolatedTestCase):
+    def test_stdio_batches_are_enabled_only_after_2025_03_26_negotiation(self):
+        members = [{"jsonrpc": "2.0", "id": index, "method": "ping"} for index in range(2)]
+        replies = exchange(frame(_initialize("2025-03-26")), frame(members))
+        self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-03-26")
+        self.assertEqual(
+            replies[1],
+            [
+                {"jsonrpc": "2.0", "id": 0, "result": {}},
+                {"jsonrpc": "2.0", "id": 1, "result": {}},
+            ],
+        )
+
+        for version in (*rpc.SUPPORTED_PROTOCOLS, "1999-01-01"):
+            if version == "2025-03-26":
+                continue
+            with self.subTest(version=version):
+                output = exchange(frame(_initialize(version)), frame(members))
+                negotiated = output[0]["result"]["protocolVersion"]
+                self.assertEqual(
+                    negotiated, version if version in rpc.SUPPORTED_PROTOCOLS else rpc.SUPPORTED_PROTOCOLS[0]
+                )
+                self.assertEqual(
+                    output[1],
+                    {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32600, "message": "Batch requests are not supported"},
+                    },
+                )
+
+        self.assertEqual(
+            rpc.handle(members),
+            {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32600, "message": "Batch requests are not supported"},
+            },
+        )
+
+    def test_batch_members_get_ordered_replies_with_exact_invalid_ids(self):
+        members = [
+            {"jsonrpc": "2.0", "id": "first", "method": "ping"},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "1.0", "id": "wrong-version", "method": "ping"},
+            {"jsonrpc": "2.0", "id": True, "method": "ping"},
+            3,
+            {"jsonrpc": "2.0", "id": "response", "result": {}},
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": "missing"},
+                "extra": True,
+            },
+            {"jsonrpc": "2.0", "id": "last", "method": "ping"},
+        ]
+        replies = [json.loads(line) for line in _batch_bytes(members).splitlines()]
+        self.assertEqual(
+            replies,
+            [
+                [
+                    {"jsonrpc": "2.0", "id": "first", "result": {}},
+                    {"jsonrpc": "2.0", "id": "wrong-version", "error": {"code": -32600, "message": "Invalid Request"}},
+                    {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}},
+                    {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}},
+                    {"jsonrpc": "2.0", "id": "response", "error": {"code": -32600, "message": "Invalid Request"}},
+                    {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}},
+                    {"jsonrpc": "2.0", "id": "last", "result": {}},
+                ]
+            ],
+        )
+        self.assertIsNone(rpc.handle({"jsonrpc": "2.0", "id": "response", "result": {}}))
+
+    def test_empty_batch_is_invalid_and_valid_notification_batch_is_silent(self):
+        empty = exchange(frame(_initialize("2025-03-26")), frame([]))
+        self.assertEqual(len(empty), 2)
+        self.assertEqual(
+            empty[1], {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}}
+        )
+
+        notifications = [
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "absent"}},
+        ]
+        silent = exchange(frame(_initialize("2025-03-26")), frame(notifications))
+        self.assertEqual(len(silent), 1)
+        self.assertEqual(silent[0]["id"], "init")
+
+    def test_batch_does_not_dispatch_idless_request_shaped_members(self):
+        idless_run = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "agiw_nisi_run", "arguments": {}},
+        }
+        idless_initialize = _initialize("2025-03-26")
+        idless_initialize.pop("id")
+        modern_notification = {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {"_meta": {rpc.PROTOCOL_VERSION_KEY: "2026-07-28", rpc.CLIENT_CAPABILITIES_KEY: {}}},
+        }
+        supported_notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        ping = {"jsonrpc": "2.0", "id": "after", "method": "ping"}
+        members = [idless_run, idless_initialize, modern_notification, supported_notification, ping]
+
+        session = rpc._Session(io.BytesIO(frame(members)), io.BytesIO())
+        session.negotiated_version = "2025-03-26"
+        with (
+            mock.patch.object(session, "dispatch", wraps=session.dispatch) as dispatch,
+            mock.patch.object(rpc, "call_tool") as call_tool,
+        ):
+            session.loop()
+
+        dispatched = [call.args[0] for call in dispatch.call_args_list]
+        for unsupported in (idless_run, idless_initialize, modern_notification):
+            self.assertNotIn(unsupported, dispatched)
+        self.assertEqual(
+            [json.loads(line) for line in session.stdout.getvalue().splitlines()],
+            [[{"jsonrpc": "2.0", "id": "after", "result": {}}]],
+        )
+        call_tool.assert_not_called()
+
+        with mock.patch.object(rpc, "call_tool") as call_tool:
+            for standalone in (idless_run, idless_initialize, modern_notification):
+                self.assertIsNone(rpc.handle(standalone))
+        call_tool.assert_not_called()
+
+    def test_batch_keeps_initialize_legacy_and_rejects_modern_marked_members(self):
+        modern_meta = {
+            rpc.PROTOCOL_VERSION_KEY: "2026-07-28",
+            rpc.CLIENT_CAPABILITIES_KEY: {},
+        }
+        members = [
+            _initialize("2025-03-26") | {"id": "nested-init"},
+            {
+                "jsonrpc": "2.0",
+                "id": "modern",
+                "method": "tools/list",
+                "params": {"_meta": modern_meta},
+            },
+            {"jsonrpc": "2.0", "id": "legacy", "method": "ping"},
+        ]
+        with mock.patch.object(rpc, "call_tool") as call_tool:
+            replies = [json.loads(line) for line in _batch_bytes(members).splitlines()]
+        self.assertEqual(
+            replies,
+            [
+                [
+                    {"jsonrpc": "2.0", "id": "nested-init", "error": {"code": -32600, "message": "Invalid Request"}},
+                    {"jsonrpc": "2.0", "id": "modern", "error": {"code": -32600, "message": "Invalid Request"}},
+                    {"jsonrpc": "2.0", "id": "legacy", "result": {}},
+                ]
+            ],
+        )
+        call_tool.assert_not_called()
+
+    def test_batch_exact_aggregate_limit_and_member_fallback(self):
+        members = [{"jsonrpc": "2.0", "id": "boundary", "method": "tools/list"}]
+        expected = [rpc.handle(member) for member in members]
+        expected_raw = json.dumps(expected, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode("ascii")
+        with mock.patch.object(rpc, "MAX_OUTPUT_BYTES", len(expected_raw)):
+            raw = _batch_bytes(members)
+        self.assertEqual(raw, expected_raw + b"\n")
+        self.assertEqual(len(raw) - 1, len(expected_raw))
+
+        oversized = {"jsonrpc": "2.0", "id": "list", "method": "tools/list"}
+        ping = {"jsonrpc": "2.0", "id": "fits", "method": "ping"}
+        fallback = rpc._batch_fallback(oversized)
+        ping_fallback = rpc._batch_fallback(ping)
+        minimum = 1 + len(rpc._encoded(fallback)) + 1 + len(rpc._encoded(ping_fallback)) + 1
+        with mock.patch.object(rpc, "MAX_OUTPUT_BYTES", minimum):
+            raw = _batch_bytes([oversized, ping])
+        self.assertEqual(
+            json.loads(raw),
+            [fallback, {"jsonrpc": "2.0", "id": "fits", "result": {}}],
+        )
+
+    def test_batch_over_reserve_refuses_before_dispatch_without_partial_output(self):
+        scalar = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "Response too large"}}
+        member = {
+            "jsonrpc": "2.0",
+            "id": "x" * 256,
+            "method": "tools/call",
+            "params": {"name": "agiw_readiness", "arguments": {}},
+        }
+        with (
+            mock.patch.object(rpc, "MAX_OUTPUT_BYTES", len(rpc._encoded(scalar))),
+            mock.patch.object(rpc, "call_tool") as call_tool,
+        ):
+            raw = _batch_bytes([member])
+        self.assertEqual(json.loads(raw), scalar)
+        self.assertEqual(len(raw.splitlines()), 1)
+        call_tool.assert_not_called()
+
+    def test_more_than_16_synchronous_batch_members_do_not_use_pending_frame_slots(self):
+        members = [{"jsonrpc": "2.0", "id": index, "method": "ping"} for index in range(24)]
+        replies = exchange(frame(_initialize("2025-03-26")), frame(members))
+        self.assertEqual(len(replies), 2)
+        self.assertEqual(len(replies[1]), 24)
+        self.assertEqual([reply["id"] for reply in replies[1]], list(range(24)))
+
+    def test_same_array_cancel_does_not_cancel_active_nisi_member(self):
+        run = {
+            "jsonrpc": "2.0",
+            "id": "run",
+            "method": "tools/call",
+            "params": {"name": "agiw_nisi_run", "arguments": {}},
+        }
+        cancel = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "run"}}
+        ping = {"jsonrpc": "2.0", "id": "after", "method": "ping"}
+        with _session(self, events=(), version="2025-03-26") as session:
+            session.stdin.send([run, cancel, ping])
+            self.assertTrue(session.started.wait(2))
+            session.ping("outside")
+            self.assertEqual(session.next(), {"jsonrpc": "2.0", "id": "outside", "result": {}})
+            self.assertTrue(session.stdout.frames.empty())
+            session.release.set()
+            self.assertEqual(
+                session.next(),
+                [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "run",
+                        "result": {
+                            "content": [{"type": "text", "text": '{\n "outcome": "COMPLETED"\n}'}],
+                            "structuredContent": {"outcome": "COMPLETED"},
+                            "isError": False,
+                        },
+                    },
+                    {"jsonrpc": "2.0", "id": "after", "result": {}},
+                ],
+            )
+            self.assertEqual(session.stdout.writers, {session.thread.ident})
+
+    def test_later_line_cancel_drops_active_and_future_batch_runs(self):
+        def run(identifier):
+            return {
+                "jsonrpc": "2.0",
+                "id": identifier,
+                "method": "tools/call",
+                "params": {"name": "agiw_nisi_run", "arguments": {}, "_meta": {"progressToken": identifier}},
+            }
+
+        def cancel(identifier):
+            return {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": identifier},
+            }
+
+        calls = []
+        with _session(self, events=(), version="2025-03-26") as session:
+
+            def call_tool(name, args):
+                calls.append(name)
+                return session.tool(name, args)
+
+            with mock.patch.object(rpc, "call_tool", side_effect=call_tool):
+                session.stdin.send([run("active"), run("future"), {"jsonrpc": "2.0", "id": "kept", "method": "ping"}])
+                self.assertTrue(session.started.wait(2))
+                self.assertIsNotNone(session.callback)
+                session.callback(_EVENT)
+                self.assertEqual(session.next()["method"], "notifications/progress")
+                session.stdin.send(cancel("active"))
+                session.stdin.send(cancel("future"))
+                session.ping("barrier")
+                self.assertEqual(session.next(), {"jsonrpc": "2.0", "id": "barrier", "result": {}})
+                session.callback(_EVENT)
+                session.release.set()
+                self.assertEqual(session.next(), [{"jsonrpc": "2.0", "id": "kept", "result": {}}])
+            self.assertEqual(calls, ["agiw_nisi_run"])
+            self.assertEqual(session.stdout.writers, {session.thread.ident})
+
+    def test_eof_while_batch_run_is_active_emits_no_partial_aggregate(self):
+        eof_posted = threading.Event()
+        original_post = rpc._Session.post
+
+        def track_eof(session, event):
+            original_post(session, event)
+            if event == ("frame", None):
+                eof_posted.set()
+
+        run = {
+            "jsonrpc": "2.0",
+            "id": "run",
+            "method": "tools/call",
+            "params": {"name": "agiw_nisi_run", "arguments": {}},
+        }
+        with (
+            mock.patch.object(rpc._Session, "post", track_eof),
+            _session(self, events=(), version="2025-03-26") as session,
+        ):
+            initialized = list(session.stdout.writes)
+            session.stdin.send([run, {"jsonrpc": "2.0", "id": "later", "method": "ping"}])
+            self.assertTrue(session.started.wait(2))
+            session.stdin.frames.put(b"")
+            self.assertTrue(eof_posted.wait(2))
+            session.release.set()
+            session.thread.join(timeout=2)
+            self.assertFalse(session.thread.is_alive())
+            self.assertEqual(session.stdout.writes, initialized)
+
     def test_encode_nonserializable_and_nan_results(self):
         for value in (object(), float("nan")):
             with self.subTest(value=type(value).__name__):
