@@ -68,6 +68,7 @@ jobs:
       - name: Unit tests (no network; loopback fakes only)
         env:
           PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: error
         run: python -B -m unittest discover -s tests -v
 
   python-only:
@@ -84,6 +85,7 @@ jobs:
       - name: Unit tests without Node (fake runner)
         env:
           PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: error
         run: |
           node_free_path="$(mktemp -d "$RUNNER_TEMP/python-only.XXXXXX")"
           ln -s "$(command -v python)" "$node_free_path/python"
@@ -147,13 +149,13 @@ jobs:
             python -m venv "$RUNNER_TEMP/installed"
             "$RUNNER_TEMP/installed/bin/python" -m pip install "$artifact"
             cd "$RUNNER_TEMP"
-            "$RUNNER_TEMP/installed/bin/python" -I "$GITHUB_WORKSPACE/scripts/installed_smoke.py"
-            AGIW_MCP_TEST_INSTALLED=1 "$RUNNER_TEMP/installed/bin/python" -B -m unittest discover \
+            "$RUNNER_TEMP/installed/bin/python" -I -W error "$GITHUB_WORKSPACE/scripts/installed_smoke.py"
+            AGIW_MCP_TEST_INSTALLED=1 PYTHONWARNINGS=error "$RUNNER_TEMP/installed/bin/python" -B -m unittest discover \
               -s "$GITHUB_WORKSPACE/tests" -p test_nisi_model_responses.py -v
             # Replay the Jev boundary golden fixtures against the installed archive, not src/.
-            AGIW_MCP_TEST_INSTALLED=1 "$RUNNER_TEMP/installed/bin/python" -B -c \
+            AGIW_MCP_TEST_INSTALLED=1 PYTHONWARNINGS=error "$RUNNER_TEMP/installed/bin/python" -B -c \
               "import agiw_mcp, sys; sys.exit('agiw_mcp imported from the checkout' if '$GITHUB_WORKSPACE' in agiw_mcp.__file__ else 0)"
-            AGIW_MCP_TEST_INSTALLED=1 "$RUNNER_TEMP/installed/bin/python" -B -m unittest discover \
+            AGIW_MCP_TEST_INSTALLED=1 PYTHONWARNINGS=error "$RUNNER_TEMP/installed/bin/python" -B -m unittest discover \
               -s "$GITHUB_WORKSPACE/tests" -p 'test_jev_analyse_golden*.py'
             cd "$GITHUB_WORKSPACE"
             rm -rf "$RUNNER_TEMP/installed"
@@ -185,13 +187,14 @@ jobs:
           url="git+https://github.com/${repo}@${ref}"
           echo "installing ${url}"
           uv tool install "$url"
+          export PYTHONWARNINGS=error
           "$UV_TOOL_BIN_DIR/agiw-mcp" --version
           python3 scripts/stdio_handshake.py "$UV_TOOL_BIN_DIR/agiw-mcp"
           npx --yes @modelcontextprotocol/inspector@2.14.0 --cli "$UV_TOOL_BIN_DIR/agiw-mcp" \
             --method tools/list --format json > "$RUNNER_TEMP/tools.json"
           jq -e --argjson expected '["agiw_readiness","agiw_status","agiw_consent","agiw_jev_pre","agiw_jev_post","agiw_nisi_run"]' \
             '.result.tools | map(.name) == $expected' "$RUNNER_TEMP/tools.json"
-          "$UV_TOOL_DIR/agiw-mcp/bin/python" -I "$GITHUB_WORKSPACE/scripts/installed_smoke.py"
+          "$UV_TOOL_DIR/agiw-mcp/bin/python" -I -W error "$GITHUB_WORKSPACE/scripts/installed_smoke.py"
 
   windows:
     name: Python 3.12 / Node 22 / windows-latest
@@ -215,6 +218,7 @@ jobs:
       - name: Unit tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONWARNINGS: error
         run: python -B -m unittest discover -s tests -v
 
   suite-compat:
@@ -232,4 +236,4 @@ jobs:
         run: |
           set -eu
           git clone --depth 1 https://github.com/louiscalata/agiw-suite.git "$RUNNER_TEMP/agiw-suite"
-          PYTHONPATH=src python scripts/suite_compat.py "$RUNNER_TEMP/agiw-suite"
+          PYTHONPATH=src PYTHONWARNINGS=error python scripts/suite_compat.py "$RUNNER_TEMP/agiw-suite"
