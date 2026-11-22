@@ -34,16 +34,12 @@ def endpoint() -> str:
 
 
 def _usage(value) -> dict | None:
-    """Only small non-negative integer counters, so a response cannot echo text or a key back out."""
     if not isinstance(value, dict):
         return None
     items = sorted(
-        (
-            (key, count)
-            for key, count in value.items()
-            if isinstance(key, str) and USAGE_KEY.match(key) and type(count) is int and 0 <= count < 10**9
-        ),
-        key=lambda item: item[0],
+        (key, count)
+        for key, count in value.items()
+        if isinstance(key, str) and USAGE_KEY.match(key) and type(count) is int and 0 <= count < 10**9
     )[:8]
     return dict(items) or None
 
