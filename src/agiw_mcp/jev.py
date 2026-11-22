@@ -200,7 +200,7 @@ def analyse(phase: str, text, config: Config) -> dict:
     except HttpFailure as failure:
         raise _failure_error(failure, log) from None
     finally:
-        key = None  # drop the reference as early as possible
+        key = None
 
     answers = _answers(response, questions)
     if answers is None:
