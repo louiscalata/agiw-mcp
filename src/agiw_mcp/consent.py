@@ -15,7 +15,7 @@ import json
 import os
 import stat
 
-from .config import config_dir, display_path, open_nonblocking, write_private_json
+from .config import _unique_pairs, config_dir, display_path, open_nonblocking, write_private_json
 from .errors import ToolError
 from .questions import QUESTIONS
 
@@ -86,7 +86,7 @@ def _read() -> dict | None:
     if len(raw) > 16384:
         return None
     try:
-        value = json.loads(raw.decode("utf-8"))
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
     except (UnicodeError, ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
