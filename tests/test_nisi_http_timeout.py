@@ -66,10 +66,11 @@ class _Handler(BaseHTTPRequestHandler):
 class LoopbackTimeoutTests(IsolatedTestCase):
     def serve(self, delay):
         server = _DelayServer(delay)
+        self.addCleanup(server.server_close)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
+        self.addCleanup(thread.join)
         self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
         return server
 
     def run_runner(self, server, *, deadline_ms, undici_ms):
