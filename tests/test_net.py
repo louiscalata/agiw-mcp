@@ -47,6 +47,57 @@ class NetTests(IsolatedTestCase):
             self.assertEqual((ctx.exception.kind, ctx.exception.status), ("http", 429))
             self.assertTrue(body.closed)
 
+    def test_socket_close_failure_does_not_leave_other_sockets_or_workers_owned(self):
+        permits = threading.BoundedSemaphore(2)
+        first = mock.Mock()
+        first.close.side_effect = OSError("socket close failed")
+        second = mock.Mock()
+        exchanges = []
+
+        with (
+            io.BytesIO(b'{"ok":true}') as response,
+            mock.patch.object(net, "_WORKERS", permits),
+            mock.patch.object(net, "_opener") as opener,
+        ):
+            response.status = 200
+
+            def open_response(*_args, **_kwargs):
+                exchange = net._LOCAL.exchange
+                exchange.track(first)
+                exchange.track(second)
+                exchanges.append(exchange)
+                return response
+
+            opener.return_value.open.side_effect = open_response
+            with self.assertRaises(net.HttpFailure) as ctx:
+                net.request_json("http://127.0.0.1:1235/x", timeout=3.0, max_bytes=1024)
+            self.assertEqual((ctx.exception.kind, ctx.exception.status), ("unreachable", None))
+            self.assertTrue(response.closed)
+            exchanges[0].cancel()
+
+        first.close.assert_called_once_with()
+        second.close.assert_called_once_with()
+        self.assertTrue(permits.acquire(blocking=False))
+        self.assertTrue(permits.acquire(blocking=False))
+        self.assertFalse(permits.acquire(blocking=False))
+
+    def test_http_status_takes_precedence_over_socket_close_failure(self):
+        url = "http://127.0.0.1:1235/x"
+        tracked = mock.Mock()
+        tracked.close.side_effect = OSError("socket close failed")
+        with io.BytesIO(b"busy") as body, mock.patch.object(net, "_opener") as opener:
+
+            def open_response(*_args, **_kwargs):
+                net._LOCAL.exchange.track(tracked)
+                raise urllib.error.HTTPError(url, 429, "busy", {}, body)
+
+            opener.return_value.open.side_effect = open_response
+            with self.assertRaises(net.HttpFailure) as ctx:
+                net.request_json(url, timeout=3.0, max_bytes=1024)
+            self.assertEqual((ctx.exception.kind, ctx.exception.status), ("http", 429))
+            self.assertTrue(body.closed)
+        tracked.close.assert_called_once_with()
+
     def test_http_error_body_is_closed_after_caller_timeout(self):
         url = "http://127.0.0.1:1235/x"
         started = threading.Event()
