@@ -290,17 +290,17 @@ def _configured_models(config: Config | None) -> dict:
 
 def evaluate(stop_at_first: bool = True) -> dict:
     checks: list[dict] = []
-    holder: dict = {}
+    config: Config | None = None
 
     def config_step() -> dict:
-        row, holder["config"] = check_config()
+        nonlocal config
+        row, config = check_config()
         return row
 
     def models_step() -> dict:
-        return _configured_models(holder.get("config"))
+        return _configured_models(config)
 
     def key_step() -> dict:
-        # Looking for the key comes after consent: on Linux the Secret Service lookup returns the secret.
         if not consent.consent_recorded():
             return _check(
                 "jev_key",
@@ -308,13 +308,13 @@ def evaluate(stop_at_first: bool = True) -> dict:
                 "Not checked until consent is recorded",
                 "Grant consent first (`agiw-mcp consent grant`), then run agiw_readiness again.",
             )
-        return check_key(holder.get("config") or Config())
+        return check_key(config or Config())
 
     def node_step() -> dict:
-        return check_node(holder.get("config"))
+        return check_node(config)
 
     def syntax_python_step() -> dict | None:
-        return check_syntax_python(holder.get("config"))
+        return check_syntax_python(config)
 
     steps = [
         ("python", check_python),
@@ -334,8 +334,8 @@ def evaluate(stop_at_first: bool = True) -> dict:
         checks.append(row)
         if not row["ok"] and stop_at_first:
             break
-    failed = [row for row in checks if not row["ok"]]
-    ready = not failed
+    first = next((row for row in checks if not row["ok"]), None)
+    ready = first is None
     result = {"status": "READY" if ready else "NOT_READY", "checks": checks}
     jev_checks = []
     if ready or not stop_at_first:
@@ -349,8 +349,7 @@ def evaluate(stop_at_first: bool = True) -> dict:
         "checks": jev_checks,
     }
     result["checks"].extend(jev_checks)
-    if failed:
-        first = failed[0]
+    if first is not None:
         result["missing"] = {"id": first["id"], "detail": first["detail"], "fix": first["fix"]}
     result["next"] = (
         "Ready for local Nisi work. Give a task and relevant file contents to agiw_nisi_run. "
