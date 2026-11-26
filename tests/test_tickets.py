@@ -1006,7 +1006,7 @@ class NisiTicketTests(IsolatedTestCase):
         seen = []
 
         def fake_bounded_run(argv, **kwargs):
-            seen.append((tickets.registry().admitted(), [arg for arg in argv[1:-1]]))
+            seen.append((tickets.registry().admitted(), list(argv[1:-1])))
             report = {"outcome": "COMPLETED", "candidate": {"files": []}}
             return 0, json.dumps({"kind": nisi.RUNNER_KIND, "report": report}).encode(), "exited"
 
