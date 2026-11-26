@@ -471,7 +471,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             os.killpg(proc.pid, signal.SIGKILL)
         else:
             proc.kill()
-    except (OSError, ProcessLookupError):
+    except OSError:
         pass
 
 
