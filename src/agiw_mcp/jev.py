@@ -54,13 +54,12 @@ def _prepare(phase: str, text) -> tuple[str, int, str, int, bool]:
     except UnicodeError:
         raise ToolError("INPUT_INVALID", "The text must be valid Unicode.") from None
     input_bytes = len(raw)
-    if phase == "pre":
-        if input_bytes > consent.MAX_PRE_BYTES:
-            raise ToolError(
-                "INPUT_TOO_LARGE",
-                f"The task text is {input_bytes} bytes; the limit is {consent.MAX_PRE_BYTES}. "
-                "Summarize the task and try again.",
-            )
+    if phase == "pre" and input_bytes > consent.MAX_PRE_BYTES:
+        raise ToolError(
+            "INPUT_TOO_LARGE",
+            f"The task text is {input_bytes} bytes; the limit is {consent.MAX_PRE_BYTES}. "
+            "Summarize the task and try again.",
+        )
     input_sha = hashlib.sha256(raw).hexdigest()
     if phase == "pre" or input_bytes <= consent.MAX_POST_BYTES:
         return text, input_bytes, input_sha, input_bytes, False
