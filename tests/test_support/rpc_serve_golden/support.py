@@ -368,10 +368,7 @@ def replay(case):
         for owner, attribute, value in patches:
             stack.enter_context(mock.patch.object(owner, attribute, value))
         try:
-            if case.get("streams") == "default":
-                result = rpc.serve()
-            else:
-                result = rpc.serve(rig.stdin, rig.stdout)
+            result = rpc.serve() if case.get("streams") == "default" else rpc.serve(rig.stdin, rig.stdout)
         except BaseException as exc:  # noqa: BLE001 - the corpus records escaping transport and harness failures
             raised = {"type": type(exc).__name__, "message": str(exc)}
         finally:
